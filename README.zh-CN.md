@@ -1,0 +1,203 @@
+# Oh My Lite OpenAgent
+
+[English](./README.md) | [简体中文](./README.zh-CN.md)
+
+一个轻量、可全局安装的 OpenCode 编排层。
+
+它会为 OpenCode 增加默认主控 agent、两个规划模式、受边界约束的 subagent、兼容模型接口的插件工具，以及一个安装后可在任意项目目录生效的全局安装器。
+
+它刻意比 Oh My OpenAgent 更轻。不引入庞大运行时，不绑定特定模型，不创建隐藏自治控制平面。它只是一个容易检查、容易安装、容易卸载的 bounded OpenCode 插件。
+
+## 功能概览
+
+- `command-lead`：默认执行编排 agent。
+- `plan-builder`：可见规划模式，用于需求澄清和计划骨架。
+- `power-plan-builder`：可见深度规划模式，用于生成可执行级计划。
+- `task-lead`、`explore`、`librarian`、`review`：隐藏的受限 subagent。
+- 兼容 provider 的插件工具：`bounded_lite_route`、`bounded_lite_background`、`bounded_lite_runtime_profile`。
+- OpenCode 原生 `build` 和 `plan` 模式会被隐藏并禁用。
+- 全局安装器会保留你已有的 model、provider、API key、插件和自定义 agent。
+
+## 快速开始
+
+### 安装
+
+```bash
+git clone https://github.com/junlin-233/oh-my-lite-openagent.git
+cd oh-my-lite-openagent
+npm install
+npm run install:opencode
+```
+
+### 启动 OpenCode
+
+```bash
+oc
+```
+
+安装后插件是全局生效的。你可以在任意项目目录运行 `oc`。
+
+### 验证
+
+```bash
+oc debug config
+oc debug agent command-lead
+```
+
+`command-lead` 应该显示为 `native: false`，并包含以下工具：
+
+```text
+bounded_lite_route
+bounded_lite_background
+bounded_lite_runtime_profile
+```
+
+## AI 安装
+
+将此提示复制并粘贴到你的 LLM 智能体（Claude Code、AmpCode、Cursor 等）中：
+
+```text
+为 OpenCode 安装并配置 Oh My Lite OpenAgent：
+https://raw.githubusercontent.com/junlin-233/oh-my-lite-openagent/main/README.zh-CN.md
+
+按照 README 的快速开始执行。保留我已有的 OpenCode provider、model、API key、插件和自定义 agent。安装后使用 `oc debug config` 和 `oc debug agent command-lead` 验证。
+```
+
+详细的 AI 维护说明放在 [`AI-INSTRUCTIONS.md`](./AI-INSTRUCTIONS.md)。
+
+## 工作方式
+
+安装器只复制 OpenCode 运行所需文件：
+
+```text
+.opencode/agents
+.opencode/plugins
+.opencode/lib
+```
+
+然后将仓库里的 `opencode.json` 合并到 OpenCode 全局配置中。
+
+默认配置目录：
+
+```text
+Linux/macOS: ~/.config/opencode
+Windows:     %APPDATA%\opencode
+```
+
+指定目标目录：
+
+```bash
+npm run install:opencode -- --config-dir /path/to/opencode-config
+```
+
+只演练不写入：
+
+```bash
+node scripts/install.mjs --dry-run
+```
+
+## Agent 列表
+
+| Agent | 可见 | 模式 | 用途 |
+| --- | --- | --- | --- |
+| `command-lead` | 是 | `primary` | 默认执行编排 |
+| `plan-builder` | 是 | `all` | 规划和计划骨架收敛 |
+| `power-plan-builder` | 是 | `all` | 基于稳定骨架做深度规划 |
+| `task-lead` | 否 | `subagent` | 单个受限委派任务 |
+| `explore` | 否 | `subagent` | 本地只读探索 |
+| `librarian` | 否 | `subagent` | 外部文档和开源参考检索 |
+| `review` | 否 | `subagent` | 计划和执行结果审查 |
+| `build` | 否 | `subagent` | 被禁用的 OpenCode 内置模式覆盖 |
+| `plan` | 否 | `subagent` | 被禁用的 OpenCode 内置模式覆盖 |
+
+## 常用命令
+
+```bash
+npm test
+npm run typecheck
+npm run build
+npm run install:opencode
+```
+
+## 卸载
+
+安装器修改全局配置前会写入备份：
+
+```text
+opencode.json.bak
+```
+
+Linux/macOS 恢复方式：
+
+```bash
+cp ~/.config/opencode/opencode.json.bak ~/.config/opencode/opencode.json
+```
+
+Windows PowerShell 恢复方式：
+
+```powershell
+Copy-Item "$env:APPDATA\opencode\opencode.json.bak" "$env:APPDATA\opencode\opencode.json" -Force
+```
+
+移除本地开发产物：
+
+```bash
+rm -rf node_modules dist
+```
+
+Windows PowerShell：
+
+```powershell
+Remove-Item -Recurse -Force node_modules, dist
+```
+
+## 故障排查
+
+### `Invalid tools[n].name`
+
+请使用当前插件版本。工具名不能包含点号。合法工具名是：
+
+```text
+bounded_lite_route
+bounded_lite_background
+bounded_lite_runtime_profile
+```
+
+### OpenCode 仍然进入普通 Build/Plan
+
+运行：
+
+```bash
+npm run install:opencode
+oc debug config
+```
+
+确认：
+
+```text
+default_agent: command-lead
+build.mode: subagent
+plan.mode: subagent
+```
+
+### 插件只在当前仓库生效
+
+你可能只用了项目本地配置，没有做全局安装。运行：
+
+```bash
+npm run install:opencode
+```
+
+## 当前状态
+
+- Linux：已验证。
+- Windows：按 `%APPDATA%\opencode` 设计支持，但本仓库尚未实机验证。
+- 本环境测试的 OpenCode 版本：`1.4.6`。
+
+## 设计规则
+
+- 保持系统有边界。
+- 不增加第四个可见模式。
+- 不把隐藏 subagent 变成自治控制平面。
+- 插件工具名必须兼容 provider：`^[a-zA-Z0-9_-]+$`。
+- 安装时保留用户的 provider、model 和 API 配置。

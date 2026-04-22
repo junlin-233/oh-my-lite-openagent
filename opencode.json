@@ -1,0 +1,131 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "default_agent": "command-lead",
+  "plugin": [["./.opencode/plugins/bounded-lite.ts", { "mode": "full" }]],
+  "permission": {
+    "edit": { "*": "ask" },
+    "bash": { "*": "ask" },
+    "task": { "*": "deny" }
+  },
+  "agent": {
+    "build": {
+      "mode": "subagent",
+      "hidden": true,
+      "description": "Disabled built-in OpenCode build mode; use command-lead.",
+      "permission": {
+        "task": { "*": "deny" },
+        "edit": { "*": "deny" },
+        "bash": { "*": "deny" },
+        "*": "deny"
+      }
+    },
+    "plan": {
+      "mode": "subagent",
+      "hidden": true,
+      "description": "Disabled built-in OpenCode plan mode; use plan-builder or power-plan-builder.",
+      "permission": {
+        "task": { "*": "deny" },
+        "edit": { "*": "deny" },
+        "bash": { "*": "deny" },
+        "*": "deny"
+      }
+    },
+    "command-lead": {
+      "mode": "primary",
+      "description": "Main orchestrator for execution work with approval and state ownership.",
+      "prompt": "{file:./.opencode/agents/command-lead.md}",
+      "permission": {
+        "task": {
+          "*": "deny",
+          "plan-builder": "allow",
+          "power-plan-builder": "allow",
+          "task-lead": "allow",
+          "explore": "allow",
+          "librarian": "allow",
+          "review": "allow"
+        }
+      }
+    },
+    "plan-builder": {
+      "mode": "all",
+      "description": "Visible planner with explicit discussion mode for user-facing planning and internal normalize mode for stable skeleton convergence.",
+      "prompt": "{file:./.opencode/agents/plan-builder.md}",
+      "permission": {
+        "task": {
+          "*": "deny",
+          "explore": "allow",
+          "librarian": "allow",
+          "review": "allow"
+        },
+        "edit": { "*": "deny" },
+        "bash": { "*": "deny" }
+      }
+    },
+    "power-plan-builder": {
+      "mode": "all",
+      "description": "Visible deep planner that only expands a stable skeleton into an execution blueprint.",
+      "prompt": "{file:./.opencode/agents/power-plan-builder.md}",
+      "permission": {
+        "task": {
+          "*": "deny",
+          "explore": "allow",
+          "librarian": "allow",
+          "review": "allow"
+        },
+        "edit": { "*": "deny" },
+        "bash": { "*": "deny" }
+      }
+    },
+    "task-lead": {
+      "mode": "subagent",
+      "hidden": true,
+      "description": "Single-task orchestrator for bounded local complexity with max depth one.",
+      "prompt": "{file:./.opencode/agents/task-lead.md}",
+      "permission": {
+        "task": {
+          "*": "deny",
+          "explore": "allow",
+          "librarian": "allow",
+          "review": "allow"
+        }
+      }
+    },
+    "explore": {
+      "mode": "subagent",
+      "hidden": true,
+      "description": "Read-only local exploration of files, structure, and code context.",
+      "prompt": "{file:./.opencode/agents/explore.md}",
+      "permission": {
+        "task": { "*": "deny" },
+        "edit": { "*": "deny" },
+        "bash": { "*": "deny" },
+        "webfetch": "deny",
+        "websearch": "deny"
+      }
+    },
+    "librarian": {
+      "mode": "subagent",
+      "hidden": true,
+      "description": "External documentation and OSS reference lookup with no edit authority.",
+      "prompt": "{file:./.opencode/agents/librarian.md}",
+      "permission": {
+        "task": { "*": "deny" },
+        "edit": { "*": "deny" },
+        "bash": { "*": "deny" },
+        "webfetch": "allow",
+        "websearch": "allow"
+      }
+    },
+    "review": {
+      "mode": "subagent",
+      "hidden": true,
+      "description": "Review specialist that evaluates plans and execution outputs without silent rewrite.",
+      "prompt": "{file:./.opencode/agents/review.md}",
+      "permission": {
+        "task": { "*": "deny" },
+        "edit": { "*": "deny" },
+        "bash": { "*": "deny" }
+      }
+    }
+  }
+}
