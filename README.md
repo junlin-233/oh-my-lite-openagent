@@ -58,12 +58,12 @@ Copy and paste this prompt to your LLM agent (Claude Code, AmpCode, Cursor, etc.
 
 ```text
 Install and configure Oh My Lite OpenAgent for OpenCode:
-https://raw.githubusercontent.com/junlin-233/oh-my-lite-openagent/main/README.md
+https://raw.githubusercontent.com/junlin-233/oh-my-lite-openagent/main/AI-INSTALL.md
 
-Follow the README Quick Start. Preserve my existing OpenCode provider, model, API keys, plugins, and custom agents. After installation, verify with `oc debug config` and `oc debug agent command-lead`.
+Follow the AI installation guide exactly.
 ```
 
-Detailed AI maintainer instructions live in [`AI-INSTRUCTIONS.md`](./AI-INSTRUCTIONS.md).
+AI installation instructions live in [`AI-INSTALL.md`](./AI-INSTALL.md).
 
 ## How It Works
 
@@ -95,6 +95,22 @@ Dry run:
 ```bash
 node scripts/install.mjs --dry-run
 ```
+
+## Role Model Configuration
+
+Run this inside the OpenCode TUI:
+
+```text
+/Character-model
+```
+
+The command lists the current model for each role and the provider models available from your OpenCode config. Tell `command-lead` which roles to update, for example:
+
+```text
+Use openai/gpt-5.4 for command-lead and review. Use openai/gpt-5.4-mini for explore and librarian.
+```
+
+The command writes `agent.<role>.model` into OpenCode config and keeps unrelated provider, model, plugin, and custom agent settings.
 
 ## Agent Map
 

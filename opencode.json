@@ -2,6 +2,13 @@
   "$schema": "https://opencode.ai/config.json",
   "default_agent": "command-lead",
   "plugin": [["./.opencode/plugins/bounded-lite.ts", { "mode": "full" }]],
+  "command": {
+    "Character-model": {
+      "description": "Configure Oh My Lite OpenAgent character role models from the OpenCode TUI.",
+      "agent": "command-lead",
+      "template": "Configure per-role models for Oh My Lite OpenAgent. First call bounded_lite_model_config with action=list. Show the current role model map and available provider models. Ask the user which roles to update. When the user chooses, call bounded_lite_model_config with action=apply and assignments as an object whose keys are role names and values are provider/model ids. Preserve unrelated OpenCode config."
+    }
+  },
   "permission": {
     "edit": { "*": "ask" },
     "bash": { "*": "ask" },

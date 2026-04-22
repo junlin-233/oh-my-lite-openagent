@@ -58,12 +58,12 @@ bounded_lite_runtime_profile
 
 ```text
 为 OpenCode 安装并配置 Oh My Lite OpenAgent：
-https://raw.githubusercontent.com/junlin-233/oh-my-lite-openagent/main/README.zh-CN.md
+https://raw.githubusercontent.com/junlin-233/oh-my-lite-openagent/main/AI-INSTALL.md
 
-按照 README 的快速开始执行。保留我已有的 OpenCode provider、model、API key、插件和自定义 agent。安装后使用 `oc debug config` 和 `oc debug agent command-lead` 验证。
+严格按照 AI 安装指南执行。
 ```
 
-详细的 AI 维护说明放在 [`AI-INSTRUCTIONS.md`](./AI-INSTRUCTIONS.md)。
+AI 安装说明放在 [`AI-INSTALL.md`](./AI-INSTALL.md)。
 
 ## 工作方式
 
@@ -95,6 +95,22 @@ npm run install:opencode -- --config-dir /path/to/opencode-config
 ```bash
 node scripts/install.mjs --dry-run
 ```
+
+## 角色模型配置
+
+在 OpenCode TUI 里运行：
+
+```text
+/Character-model
+```
+
+这个命令会列出每个角色当前使用的模型，以及 OpenCode 配置中可用的 provider 模型。然后告诉 `command-lead` 你想怎么分配，例如：
+
+```text
+command-lead 和 review 使用 openai/gpt-5.4。explore 和 librarian 使用 openai/gpt-5.4-mini。
+```
+
+命令会把 `agent.<role>.model` 写入 OpenCode 配置，同时保留无关的 provider、model、插件和自定义 agent 设置。
 
 ## Agent 列表
 

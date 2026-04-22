@@ -30,6 +30,7 @@ export interface ToolExecutionAfter {
 
 export interface ToolDefinition {
   description: string;
+  args?: unknown;
   execute: (args: Record<string, unknown>, context: PluginInput) => Promise<unknown> | unknown;
 }
 

@@ -6,6 +6,17 @@ import {
 } from "../lib/runtime/plugin-types.js";
 import { resolveCategoryRoute } from "../lib/runtime/categories.js";
 import { createRuntimeProfile } from "../lib/runtime/safety.js";
+import {
+  applyRoleModelConfig,
+  formatModelConfigReport,
+  listProviderModels,
+  listProviderModelsFromResponse,
+  mergeProviderModels,
+  summarizeRoleModels,
+} from "../lib/runtime/model-config.js";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
 export interface BoundedLitePluginOptions {
   mode?: "full" | "degraded";
@@ -38,6 +49,57 @@ function isRoutingCategory(value: unknown): value is RoutingCategory {
     value === "librarian" ||
     value === "review"
   );
+}
+
+function defaultConfigDir(): string {
+  if (process.env.OPENCODE_CONFIG_DIR) return path.resolve(process.env.OPENCODE_CONFIG_DIR);
+
+  if (process.platform === "win32") {
+    return path.join(process.env.APPDATA ?? path.join(os.homedir(), "AppData", "Roaming"), "opencode");
+  }
+
+  return path.join(process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config"), "opencode");
+}
+
+async function readOpenCodeConfig(): Promise<Record<string, unknown>> {
+  const configPath = path.join(defaultConfigDir(), "opencode.json");
+  const content = await readFile(configPath, "utf8");
+  return JSON.parse(content) as Record<string, unknown>;
+}
+
+async function writeOpenCodeConfig(config: Record<string, unknown>): Promise<string> {
+  const configPath = path.join(defaultConfigDir(), "opencode.json");
+  await mkdir(path.dirname(configPath), { recursive: true });
+  await writeFile(`${configPath}.bak`, `${JSON.stringify(await readOpenCodeConfig(), null, 2)}\n`);
+  await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
+  return configPath;
+}
+
+async function listRuntimeProviderModels(input: PluginInput): Promise<ReturnType<typeof listProviderModels>> {
+  const client = input.client as {
+    config?: {
+      providers?: (parameters?: Record<string, unknown>) => Promise<unknown>;
+    };
+    provider?: {
+      list?: (parameters?: Record<string, unknown>) => Promise<unknown>;
+    };
+  } | undefined;
+  const query = { directory: input.directory, workspace: input.worktree };
+
+  try {
+    const response = await client?.config?.providers?.(query);
+    const models = listProviderModelsFromResponse(response);
+    if (models.length > 0) return models;
+  } catch {
+    // Fall back to provider.list and finally JSON config below.
+  }
+
+  try {
+    const response = await client?.provider?.list?.(query);
+    return listProviderModelsFromResponse(response);
+  } catch {
+    return [];
+  }
 }
 
 export function createBoundedLitePlugin(
@@ -84,6 +146,55 @@ export function createBoundedLitePlugin(
         description: "Report the current runtime profile without creating a second control plane.",
         execute() {
           return runtimeProfile;
+        },
+      },
+      bounded_lite_model_config: {
+        description: "List or update per-role OpenCode models for Oh My Lite OpenAgent.",
+        async execute(args, context) {
+          const action = typeof args["action"] === "string" ? args["action"] : "list";
+          const config = await readOpenCodeConfig();
+          const models = mergeProviderModels(
+            await listRuntimeProviderModels(context),
+            listProviderModels(config),
+          );
+
+          if (action === "list") {
+            return formatModelConfigReport({
+              roles: summarizeRoleModels(config),
+              models,
+            });
+          }
+
+          if (action === "apply") {
+            const assignments = args["assignments"];
+
+            if (typeof assignments !== "object" || assignments === null || Array.isArray(assignments)) {
+              throw new Error(
+                "bounded_lite_model_config apply requires assignments: { role: \"provider/model\" }.",
+              );
+            }
+
+            const result = applyRoleModelConfig(
+              config,
+              assignments as Record<string, unknown>,
+              models.map((model) => model.id),
+            );
+            const configPath = await writeOpenCodeConfig(config);
+
+            return [
+              formatModelConfigReport({
+                roles: summarizeRoleModels(config),
+                models,
+                changed: result.changed,
+                skipped: result.skipped,
+                warnings: result.warnings,
+              }),
+              "",
+              `Updated ${configPath}. Restart OpenCode or start a new session if the active TUI keeps old model state.`,
+            ].join("\n");
+          }
+
+          throw new Error("bounded_lite_model_config action must be list or apply.");
         },
       },
     },

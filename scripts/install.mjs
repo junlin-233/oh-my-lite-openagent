@@ -116,6 +116,10 @@ function mergeConfig(existingConfig, sourceConfig) {
     plugin: plugins,
     default_agent: sourceConfig.default_agent,
     permission: existingConfig.permission ?? sourceConfig.permission,
+    command: {
+      ...(existingConfig.command ?? {}),
+      ...(sourceConfig.command ?? {}),
+    },
     agent: {
       ...(existingConfig.agent ?? {}),
       ...sourceConfig.agent,

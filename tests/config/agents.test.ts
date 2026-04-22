@@ -4,12 +4,20 @@ import path from "node:path";
 const configPath = path.resolve(process.cwd(), "opencode.json");
 const config = JSON.parse(readFileSync(configPath, "utf8")) as {
   default_agent?: string;
+  command?: Record<string, { agent?: string; template?: string; description?: string }>;
   agent: Record<string, { mode: string; hidden?: boolean; description?: string }>;
 };
 
 describe("OpenCode agent topology", () => {
   it("starts OpenCode in the bounded command lead by default", () => {
     expect(config.default_agent).toBe("command-lead");
+  });
+
+  it("registers a TUI command for role model configuration", () => {
+    expect(config.command?.["Character-model"]).toMatchObject({
+      agent: "command-lead",
+    });
+    expect(config.command?.["Character-model"]?.template).toContain("bounded_lite_model_config");
   });
 
   it("registers seven bounded roles plus disabled built-in overrides", () => {
