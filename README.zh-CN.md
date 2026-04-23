@@ -4,6 +4,8 @@
 
 一个轻量、可全局安装的 OpenCode 编排层。
 
+本项目是独立的 OpenCode 插件，不隶属于 OpenCode 官方，也不代表 OpenCode 官方背书或维护。
+
 它会为 OpenCode 增加默认主控 agent、两个规划模式、受边界约束的 subagent、兼容模型接口的插件工具，以及一个安装后可在任意项目目录生效的全局安装器。
 
 它刻意比 Oh My OpenAgent 更轻。不引入庞大运行时，不绑定特定模型，不创建隐藏自治控制平面。它只是一个容易检查、容易安装、容易卸载的 bounded OpenCode 插件。
@@ -12,9 +14,12 @@
 
 - `command-lead`：默认执行编排 agent。
 - `plan-builder`：可见规划模式，用于需求澄清和计划骨架。
-- `power-plan-builder`：可见深度规划模式，用于生成可执行级计划。
-- `task-lead`、`explore`、`librarian`、`review`：隐藏的受限 subagent。
-- 兼容 provider 的插件工具：`bounded_lite_route`、`bounded_lite_background`、`bounded_lite_runtime_profile`。
+- `deep-plan-builder`：可见深度规划模式，并强制进入计划审查。
+- `task-lead`、`explore`、`librarian`、`plan-review`、`result-review`：隐藏的受限 subagent。
+- 每个角色都参照 OpenCode 的任务追踪风格维护自己的本地 todo 列表，但 todo 不替代 artifact 或 canonical state。
+- `result-review` 是用户可选择调用的可选审查，只审查 Command Lead 的执行摘要/最终整合结果，不审查 Task Lead 子任务返回。
+- 有委派权的角色派遣任务时使用显式模板：`TASK`、`EXPECTED OUTCOME`、`ROLE`、`SCOPE`、`UPSTREAM EVIDENCE`、`REQUIRED TOOLS`、`MUST DO`、`MUST NOT DO`、`CONTEXT`、`DELIVERABLE FORMAT`、`FAILURE RETURN`。
+- 兼容 provider 的插件工具：`bounded_lite_route`、`bounded_lite_plan_dag`、`bounded_lite_background`、`bounded_lite_runtime_profile`、`bounded_lite_model_config`。
 - OpenCode 原生 `build` 和 `plan` 模式会被隐藏并禁用。
 - 全局安装器会保留你已有的 model、provider、API key、插件和自定义 agent。
 
@@ -48,8 +53,10 @@ oc debug agent command-lead
 
 ```text
 bounded_lite_route
+bounded_lite_plan_dag
 bounded_lite_background
 bounded_lite_runtime_profile
+bounded_lite_model_config
 ```
 
 ## AI 安装
@@ -107,7 +114,7 @@ node scripts/install.mjs --dry-run
 这个命令会列出每个角色当前使用的模型，以及 OpenCode 配置中可用的 provider 模型。然后告诉 `command-lead` 你想怎么分配，例如：
 
 ```text
-command-lead 和 review 使用 openai/gpt-5.4。explore 和 librarian 使用 openai/gpt-5.4-mini。
+command-lead、plan-builder 和 plan-review 使用 openai/gpt-5.4。explore 和 librarian 使用 openai/gpt-5.4-mini。
 ```
 
 命令会把 `agent.<role>.model` 写入 OpenCode 配置，同时保留无关的 provider、model、插件和自定义 agent 设置。
@@ -118,11 +125,12 @@ command-lead 和 review 使用 openai/gpt-5.4。explore 和 librarian 使用 ope
 | --- | --- | --- | --- |
 | `command-lead` | 是 | `primary` | 默认执行编排 |
 | `plan-builder` | 是 | `all` | 规划和计划骨架收敛 |
-| `power-plan-builder` | 是 | `all` | 基于稳定骨架做深度规划 |
+| `deep-plan-builder` | 是 | `all` | 带强制计划审查的深度规划 |
 | `task-lead` | 否 | `subagent` | 单个受限委派任务 |
 | `explore` | 否 | `subagent` | 本地只读探索 |
 | `librarian` | 否 | `subagent` | 外部文档和开源参考检索 |
-| `review` | 否 | `subagent` | 计划和执行结果审查 |
+| `plan-review` | 否 | `subagent` | 计划产物审查 |
+| `result-review` | 否 | `subagent` | 可选审查 Command Lead 执行结果 |
 | `build` | 否 | `subagent` | 被禁用的 OpenCode 内置模式覆盖 |
 | `plan` | 否 | `subagent` | 被禁用的 OpenCode 内置模式覆盖 |
 
@@ -175,8 +183,10 @@ Remove-Item -Recurse -Force node_modules, dist
 
 ```text
 bounded_lite_route
+bounded_lite_plan_dag
 bounded_lite_background
 bounded_lite_runtime_profile
+bounded_lite_model_config
 ```
 
 ### OpenCode 仍然进入普通 Build/Plan
@@ -215,5 +225,8 @@ npm run install:opencode
 - 保持系统有边界。
 - 不增加第四个可见模式。
 - 不把隐藏 subagent 变成自治控制平面。
+- 每个角色的 todo 列表只作为本角色工作记忆，不替代 canonical state 或 artifact 记录。
+- Result Review 保持可选，并限定为审查 Command Lead 拥有的执行摘要。
+- 派遣任务必须显式、有边界；不要使用隐藏 initiator marker，也不要要求 whole-repo 无边界搜索。
 - 插件工具名必须兼容 provider：`^[a-zA-Z0-9_-]+$`。
 - 安装时保留用户的 provider、model 和 API 配置。

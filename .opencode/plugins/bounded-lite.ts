@@ -5,6 +5,7 @@ import {
   type PluginInput,
 } from "../lib/runtime/plugin-types.js";
 import { resolveCategoryRoute } from "../lib/runtime/categories.js";
+import { buildTaskDAG, type TaskDispatchConfig } from "../lib/runtime/plan-dag.js";
 import { createRuntimeProfile } from "../lib/runtime/safety.js";
 import {
   applyRoleModelConfig,
@@ -47,7 +48,8 @@ function isRoutingCategory(value: unknown): value is RoutingCategory {
     value === "deep-planning" ||
     value === "explore" ||
     value === "librarian" ||
-    value === "review"
+    value === "plan-review" ||
+    value === "result-review"
   );
 }
 
@@ -59,6 +61,10 @@ function defaultConfigDir(): string {
   }
 
   return path.join(process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config"), "opencode");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function readOpenCodeConfig(): Promise<Record<string, unknown>> {
@@ -134,6 +140,15 @@ export function createBoundedLitePlugin(
           }
 
           return resolveCategoryRoute(category);
+        },
+      },
+      bounded_lite_plan_dag: {
+        description: "Validate a required plan.subtasks payload and return bounded DAG waves plus dispatch profiles.",
+        execute(args) {
+          const payload = args["payload"];
+          const dispatch = isRecord(args["dispatch"]) ? args["dispatch"] : {};
+
+          return buildTaskDAG(payload, dispatch as Partial<TaskDispatchConfig>);
         },
       },
       bounded_lite_background: {

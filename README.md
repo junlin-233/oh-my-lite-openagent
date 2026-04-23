@@ -4,6 +4,8 @@
 
 A small, installable OpenCode orchestration layer.
 
+This project is an independent OpenCode plugin and is not affiliated with, endorsed by, or maintained by the OpenCode team.
+
 It gives OpenCode a default command lead, two planning modes, bounded subagents, safe plugin tools, and a global installer that works from any project directory after setup.
 
 This is intentionally lighter than Oh My OpenAgent. No giant runtime, no model lock-in, no hidden autonomous control plane. Just a bounded OpenCode plugin that is easy to inspect, install, and remove.
@@ -12,9 +14,12 @@ This is intentionally lighter than Oh My OpenAgent. No giant runtime, no model l
 
 - `command-lead`: the default execution orchestrator.
 - `plan-builder`: visible planning mode for requirements and plan skeletons.
-- `power-plan-builder`: visible deep planning mode for execution-grade plans.
-- `task-lead`, `explore`, `librarian`, `review`: hidden bounded subagents.
-- Provider-safe plugin tools: `bounded_lite_route`, `bounded_lite_background`, `bounded_lite_runtime_profile`.
+- `deep-plan-builder`: visible deep planning mode with mandatory plan review.
+- `task-lead`, `explore`, `librarian`, `plan-review`, `result-review`: hidden bounded subagents.
+- Each role maintains its own local todo list for multi-step work, following OpenCode-style task tracking without replacing artifacts or canonical state.
+- `result-review` is optional and user-selectable. It reviews Command Lead execution summaries/final integrated results, not Task Lead child task returns.
+- Delegating roles use an explicit assignment template: `TASK`, `EXPECTED OUTCOME`, `ROLE`, `SCOPE`, `UPSTREAM EVIDENCE`, `REQUIRED TOOLS`, `MUST DO`, `MUST NOT DO`, `CONTEXT`, `DELIVERABLE FORMAT`, and `FAILURE RETURN`.
+- Provider-safe plugin tools: `bounded_lite_route`, `bounded_lite_plan_dag`, `bounded_lite_background`, `bounded_lite_runtime_profile`, `bounded_lite_model_config`.
 - OpenCode native `build` and `plan` modes hidden behind disabled overrides.
 - A global installer that preserves your existing model, provider, API key, plugins, and custom agents.
 
@@ -48,8 +53,10 @@ oc debug agent command-lead
 
 ```text
 bounded_lite_route
+bounded_lite_plan_dag
 bounded_lite_background
 bounded_lite_runtime_profile
+bounded_lite_model_config
 ```
 
 ## AI Install
@@ -107,7 +114,7 @@ Run this inside the OpenCode TUI:
 The command lists the current model for each role and the provider models available from your OpenCode config. Tell `command-lead` which roles to update, for example:
 
 ```text
-Use openai/gpt-5.4 for command-lead and review. Use openai/gpt-5.4-mini for explore and librarian.
+Use openai/gpt-5.4 for command-lead, plan-builder, and plan-review. Use openai/gpt-5.4-mini for explore and librarian.
 ```
 
 The command writes `agent.<role>.model` into OpenCode config and keeps unrelated provider, model, plugin, and custom agent settings.
@@ -118,11 +125,12 @@ The command writes `agent.<role>.model` into OpenCode config and keeps unrelated
 | --- | --- | --- | --- |
 | `command-lead` | yes | `primary` | Default execution orchestrator |
 | `plan-builder` | yes | `all` | Planning and skeleton convergence |
-| `power-plan-builder` | yes | `all` | Deep planning from a stable skeleton |
+| `deep-plan-builder` | yes | `all` | Deep planning with mandatory plan review |
 | `task-lead` | no | `subagent` | One bounded delegated task |
 | `explore` | no | `subagent` | Local read-only exploration |
 | `librarian` | no | `subagent` | External docs and OSS lookup |
-| `review` | no | `subagent` | Plan and execution review |
+| `plan-review` | no | `subagent` | Plan artifact review |
+| `result-review` | no | `subagent` | Optional review of Command Lead execution results |
 | `build` | no | `subagent` | Disabled OpenCode built-in override |
 | `plan` | no | `subagent` | Disabled OpenCode built-in override |
 
@@ -175,8 +183,10 @@ Use the current plugin version. Tool names must not contain dots. Valid names ar
 
 ```text
 bounded_lite_route
+bounded_lite_plan_dag
 bounded_lite_background
 bounded_lite_runtime_profile
+bounded_lite_model_config
 ```
 
 ### OpenCode still starts in normal Build/Plan
@@ -215,5 +225,8 @@ npm run install:opencode
 - Keep the system bounded.
 - Do not add a fourth visible mode.
 - Do not turn hidden subagents into autonomous control planes.
+- Keep each role's todo list local to that role; todos do not replace canonical state or artifact records.
+- Keep Result Review optional and scoped to Command Lead-owned execution summaries.
+- Keep delegated assignments explicit and bounded; do not use hidden initiator markers or whole-repo unbounded search instructions.
 - Keep plugin tool names provider-safe: `^[a-zA-Z0-9_-]+$`.
 - Preserve user provider/model/API configuration during install.

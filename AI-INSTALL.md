@@ -45,6 +45,7 @@ Confirm:
 - `command-lead` is `native: false`.
 - `command-lead` mode is `primary`.
 - `command-lead` tools include `bounded_lite_route`.
+- `command-lead` tools include `bounded_lite_plan_dag`.
 - `command-lead` tools include `bounded_lite_background`.
 - `command-lead` tools include `bounded_lite_runtime_profile`.
 - `command-lead` tools include `bounded_lite_model_config`.
@@ -68,6 +69,7 @@ If OpenCode reports invalid tool names, make sure plugin tools use only these na
 
 ```text
 bounded_lite_route
+bounded_lite_plan_dag
 bounded_lite_background
 bounded_lite_runtime_profile
 bounded_lite_model_config

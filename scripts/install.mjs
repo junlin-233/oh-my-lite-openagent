@@ -7,6 +7,20 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const PLUGIN_FILE = "bounded-lite.ts";
 const MANAGED_DIRS = ["agents", "plugins", "lib"];
 const DEFAULT_PLUGIN_OPTIONS = { mode: "full" };
+const MANAGED_AGENT_NAMES = new Set([
+  "build",
+  "plan",
+  "command-lead",
+  "plan-builder",
+  "power-plan-builder",
+  "deep-plan-builder",
+  "task-lead",
+  "explore",
+  "librarian",
+  "review",
+  "plan-review",
+  "result-review",
+]);
 
 function parseArgs(argv) {
   const args = {
@@ -98,6 +112,20 @@ function relativePluginSpec() {
   return ["./.opencode/plugins/bounded-lite.ts", DEFAULT_PLUGIN_OPTIONS];
 }
 
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function mergeManagedAgent(sourceAgent, existingAgent) {
+  if (!isRecord(sourceAgent)) return sourceAgent;
+  if (!isRecord(existingAgent)) return sourceAgent;
+
+  return {
+    ...sourceAgent,
+    ...(typeof existingAgent.model === "string" ? { model: existingAgent.model } : {}),
+  };
+}
+
 function mergeConfig(existingConfig, sourceConfig) {
   const existingPlugins = Array.isArray(existingConfig.plugin)
     ? existingConfig.plugin
@@ -109,6 +137,19 @@ function mergeConfig(existingConfig, sourceConfig) {
     ...existingPlugins.filter((spec) => !isManagedPluginSpec(spec)),
     relativePluginSpec(),
   ];
+  const existingAgents = isRecord(existingConfig.agent) ? existingConfig.agent : {};
+  const sourceAgents = isRecord(sourceConfig.agent) ? sourceConfig.agent : {};
+  const managedAgents = Object.fromEntries(
+    Object.entries(sourceAgents).map(([agentName, sourceAgent]) => [
+      agentName,
+      mergeManagedAgent(sourceAgent, existingAgents[agentName]),
+    ]),
+  );
+  const customAgents = Object.fromEntries(
+    Object.entries(existingConfig.agent ?? {}).filter(([agentName]) => (
+      !MANAGED_AGENT_NAMES.has(agentName)
+    )),
+  );
 
   return {
     ...existingConfig,
@@ -121,8 +162,8 @@ function mergeConfig(existingConfig, sourceConfig) {
       ...(sourceConfig.command ?? {}),
     },
     agent: {
-      ...(existingConfig.agent ?? {}),
-      ...sourceConfig.agent,
+      ...managedAgents,
+      ...customAgents,
     },
   };
 }

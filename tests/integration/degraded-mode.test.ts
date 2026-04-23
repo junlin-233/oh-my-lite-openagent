@@ -11,7 +11,7 @@ describe("degraded mode", () => {
 
     expect(profile.mode).toBe("degraded");
     expect(profile.visibleModes).toEqual(["execution", "planning", "deep-planning"]);
-    expect(profile.roleNames).toHaveLength(7);
+    expect(profile.roleNames).toHaveLength(8);
     expect(profile.canonicalStates).toEqual([
       "draft",
       "needs-approval",

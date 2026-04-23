@@ -30,6 +30,7 @@ describe("plugin safety", () => {
 
     const toolNames = Object.keys(hooks.tool ?? {});
     expect(toolNames).not.toHaveLength(0);
+    expect(toolNames).toContain("bounded_lite_plan_dag");
     expect(toolNames.every((toolName) => toolName.startsWith("bounded_lite_"))).toBe(true);
     expect(toolNames.every((toolName) => /^[a-zA-Z0-9_-]+$/.test(toolName))).toBe(true);
   });

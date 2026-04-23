@@ -45,7 +45,7 @@ describe("canonical state machine", () => {
       transitionArtifact({
         artifact,
         nextState: "needs-approval",
-        actor: "review",
+        actor: "plan-review",
       }),
     ).toThrow(/Only command-lead may advance canonical state/);
 

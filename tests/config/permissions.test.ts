@@ -19,11 +19,12 @@ describe("delegation boundaries", () => {
     expect(taskRules("command-lead")).toEqual({
       "*": "deny",
       "plan-builder": "allow",
-      "power-plan-builder": "allow",
+      "deep-plan-builder": "allow",
       "task-lead": "allow",
       explore: "allow",
       librarian: "allow",
-      review: "allow",
+      "plan-review": "allow",
+      "result-review": "allow",
     });
   });
 
@@ -32,24 +33,24 @@ describe("delegation boundaries", () => {
       "*": "deny",
       explore: "allow",
       librarian: "allow",
-      review: "allow",
+      "plan-review": "allow",
     };
 
     expect(taskRules("plan-builder")).toEqual(expected);
-    expect(taskRules("power-plan-builder")).toEqual(expected);
+    expect(taskRules("deep-plan-builder")).toEqual(expected);
   });
 
-  it("keeps Task Lead bounded and leaf specialists non-delegating", () => {
+  it("keeps Task Lead bounded and review specialists read-only", () => {
     expect(taskRules("task-lead")).toEqual({
       "*": "deny",
       explore: "allow",
       librarian: "allow",
-      review: "allow",
     });
 
     expect(taskRules("explore")).toEqual({ "*": "deny" });
     expect(taskRules("librarian")).toEqual({ "*": "deny" });
-    expect(taskRules("review")).toEqual({ "*": "deny" });
+    expect(taskRules("plan-review")).toEqual({ "*": "deny", explore: "allow" });
+    expect(taskRules("result-review")).toEqual({ "*": "deny", explore: "allow" });
   });
 
   it("denies delegation through disabled OpenCode built-in modes", () => {

@@ -19,7 +19,7 @@ export const CATEGORY_ROUTES: Readonly<Record<RoutingCategory, CategoryRoute>> =
   },
   "deep-planning": {
     category: "deep-planning",
-    targetRole: "power-plan-builder",
+    targetRole: "deep-plan-builder",
     visibleMode: "deep-planning",
   },
   explore: {
@@ -30,9 +30,13 @@ export const CATEGORY_ROUTES: Readonly<Record<RoutingCategory, CategoryRoute>> =
     category: "librarian",
     targetRole: "librarian",
   },
-  review: {
-    category: "review",
-    targetRole: "review",
+  "plan-review": {
+    category: "plan-review",
+    targetRole: "plan-review",
+  },
+  "result-review": {
+    category: "result-review",
+    targetRole: "result-review",
   },
 };
 

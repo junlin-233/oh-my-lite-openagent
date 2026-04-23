@@ -47,8 +47,10 @@ describe("config and runtime parity", () => {
 
   it("keeps planner contracts aligned with the configured dual-use planners", () => {
     expect(config.agent["plan-builder"]?.mode).toBe("all");
-    expect(config.agent["power-plan-builder"]?.mode).toBe("all");
+    expect(config.agent["deep-plan-builder"]?.mode).toBe("all");
     expect(PLANNER_CONTRACTS["plan-builder"].internalOnlyInvocations).toEqual(["normalize"]);
-    expect(PLANNER_CONTRACTS["power-plan-builder"].requiresStableSkeleton).toBe(true);
+    expect(PLANNER_CONTRACTS["plan-builder"].planReview).toBe("optional");
+    expect(PLANNER_CONTRACTS["deep-plan-builder"].planReview).toBe("required");
+    expect(PLANNER_CONTRACTS["deep-plan-builder"].modelStrength).toBe("weak");
   });
 });

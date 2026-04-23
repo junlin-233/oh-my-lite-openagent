@@ -58,7 +58,7 @@ export function validateArchitectureContracts(): ArchitectureFinding[] {
     },
     {
       name: "fixed-role-count",
-      passed: ROLE_CONTRACTS.length === 7,
+      passed: ROLE_CONTRACTS.length === 8,
       detail: `Found ${ROLE_CONTRACTS.length} fixed roles.`,
     },
     {
@@ -73,7 +73,7 @@ export function validateArchitectureContracts(): ArchitectureFinding[] {
     },
     {
       name: "category-set-stable",
-      passed: ROUTING_CATEGORIES.length === 6,
+      passed: ROUTING_CATEGORIES.length === 7,
       detail: `Found ${ROUTING_CATEGORIES.length} routing categories.`,
     },
     {
@@ -82,8 +82,10 @@ export function validateArchitectureContracts(): ArchitectureFinding[] {
         PLANNER_CONTRACTS["plan-builder"].supportedInvocations.includes("discussion") &&
         PLANNER_CONTRACTS["plan-builder"].supportedInvocations.includes("normalize") &&
         PLANNER_CONTRACTS["plan-builder"].internalOnlyInvocations.includes("normalize") &&
-        PLANNER_CONTRACTS["power-plan-builder"].requiresStableSkeleton,
-      detail: "Plan Builder keeps explicit discussion/normalize semantics and Power Plan Builder requires a stable skeleton.",
+        PLANNER_CONTRACTS["plan-builder"].planReview === "optional" &&
+        PLANNER_CONTRACTS["deep-plan-builder"].planReview === "required" &&
+        PLANNER_CONTRACTS["deep-plan-builder"].modelStrength === "weak",
+      detail: "Plan Builder keeps optional review while Deep Plan Builder requires plan review for weak-model compensation.",
     },
     {
       name: "max-orchestrator-depth",

@@ -35,7 +35,8 @@ describe("architecture conformance", () => {
       "deep-planning",
       "explore",
       "librarian",
-      "review",
+      "plan-review",
+      "result-review",
     ]);
     expect(profile.mode).toBe("full");
     expect(profile.visibleModes).toHaveLength(3);
@@ -48,13 +49,17 @@ describe("architecture conformance", () => {
       internalOnlyInvocations: ["normalize"],
       requiresStableSkeleton: false,
       outputArtifactKind: "plan-skeleton",
+      modelStrength: "strong",
+      planReview: "optional",
     });
-    expect(PLANNER_CONTRACTS["power-plan-builder"]).toEqual({
-      name: "power-plan-builder",
-      supportedInvocations: ["deepen"],
+    expect(PLANNER_CONTRACTS["deep-plan-builder"]).toEqual({
+      name: "deep-plan-builder",
+      supportedInvocations: ["discussion", "deep-plan"],
       internalOnlyInvocations: [],
-      requiresStableSkeleton: true,
+      requiresStableSkeleton: false,
       outputArtifactKind: "detailed-plan",
+      modelStrength: "weak",
+      planReview: "required",
     });
     expect(ROUTING_CATEGORIES).not.toContain("normalize");
     expect(ROUTING_CATEGORIES).not.toContain("discussion");

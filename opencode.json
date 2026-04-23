@@ -15,6 +15,55 @@
     "task": { "*": "deny" }
   },
   "agent": {
+    "command-lead": {
+      "mode": "primary",
+      "color": "#87cefa",
+      "description": "Main orchestrator for execution work with approval and state ownership.",
+      "prompt": "{file:./.opencode/agents/command-lead.md}",
+      "permission": {
+        "task": {
+          "*": "deny",
+          "plan-builder": "allow",
+          "deep-plan-builder": "allow",
+          "task-lead": "allow",
+          "explore": "allow",
+          "librarian": "allow",
+          "plan-review": "allow",
+          "result-review": "allow"
+        }
+      }
+    },
+    "plan-builder": {
+      "mode": "all",
+      "description": "Visible planner with explicit discussion mode for user-facing planning and internal normalize mode for stable skeleton convergence.",
+      "prompt": "{file:./.opencode/agents/plan-builder.md}",
+      "permission": {
+        "task": {
+          "*": "deny",
+          "explore": "allow",
+          "librarian": "allow",
+          "plan-review": "allow"
+        },
+        "edit": { "*": "deny" },
+        "bash": { "*": "deny" }
+      }
+    },
+    "deep-plan-builder": {
+      "mode": "all",
+      "color": "#ff0000",
+      "description": "Visible deep planner using mandatory plan review to compensate a weaker planning model.",
+      "prompt": "{file:./.opencode/agents/deep-plan-builder.md}",
+      "permission": {
+        "task": {
+          "*": "deny",
+          "explore": "allow",
+          "librarian": "allow",
+          "plan-review": "allow"
+        },
+        "edit": { "*": "deny" },
+        "bash": { "*": "deny" }
+      }
+    },
     "build": {
       "mode": "subagent",
       "hidden": true,
@@ -29,58 +78,12 @@
     "plan": {
       "mode": "subagent",
       "hidden": true,
-      "description": "Disabled built-in OpenCode plan mode; use plan-builder or power-plan-builder.",
+      "description": "Disabled built-in OpenCode plan mode; use plan-builder or deep-plan-builder.",
       "permission": {
         "task": { "*": "deny" },
         "edit": { "*": "deny" },
         "bash": { "*": "deny" },
         "*": "deny"
-      }
-    },
-    "command-lead": {
-      "mode": "primary",
-      "description": "Main orchestrator for execution work with approval and state ownership.",
-      "prompt": "{file:./.opencode/agents/command-lead.md}",
-      "permission": {
-        "task": {
-          "*": "deny",
-          "plan-builder": "allow",
-          "power-plan-builder": "allow",
-          "task-lead": "allow",
-          "explore": "allow",
-          "librarian": "allow",
-          "review": "allow"
-        }
-      }
-    },
-    "plan-builder": {
-      "mode": "all",
-      "description": "Visible planner with explicit discussion mode for user-facing planning and internal normalize mode for stable skeleton convergence.",
-      "prompt": "{file:./.opencode/agents/plan-builder.md}",
-      "permission": {
-        "task": {
-          "*": "deny",
-          "explore": "allow",
-          "librarian": "allow",
-          "review": "allow"
-        },
-        "edit": { "*": "deny" },
-        "bash": { "*": "deny" }
-      }
-    },
-    "power-plan-builder": {
-      "mode": "all",
-      "description": "Visible deep planner that only expands a stable skeleton into an execution blueprint.",
-      "prompt": "{file:./.opencode/agents/power-plan-builder.md}",
-      "permission": {
-        "task": {
-          "*": "deny",
-          "explore": "allow",
-          "librarian": "allow",
-          "review": "allow"
-        },
-        "edit": { "*": "deny" },
-        "bash": { "*": "deny" }
       }
     },
     "task-lead": {
@@ -92,8 +95,7 @@
         "task": {
           "*": "deny",
           "explore": "allow",
-          "librarian": "allow",
-          "review": "allow"
+          "librarian": "allow"
         }
       }
     },
@@ -123,13 +125,24 @@
         "websearch": "allow"
       }
     },
-    "review": {
+    "plan-review": {
       "mode": "subagent",
       "hidden": true,
-      "description": "Review specialist that evaluates plans and execution outputs without silent rewrite.",
-      "prompt": "{file:./.opencode/agents/review.md}",
+      "description": "Plan review specialist that evaluates plan artifacts and may request read-only Explore evidence.",
+      "prompt": "{file:./.opencode/agents/plan-review.md}",
       "permission": {
-        "task": { "*": "deny" },
+        "task": { "*": "deny", "explore": "allow" },
+        "edit": { "*": "deny" },
+        "bash": { "*": "deny" }
+      }
+    },
+    "result-review": {
+      "mode": "subagent",
+      "hidden": true,
+      "description": "Optional result review specialist for Command Lead execution summaries, with read-only Explore evidence when needed.",
+      "prompt": "{file:./.opencode/agents/result-review.md}",
+      "permission": {
+        "task": { "*": "deny", "explore": "allow" },
         "edit": { "*": "deny" },
         "bash": { "*": "deny" }
       }

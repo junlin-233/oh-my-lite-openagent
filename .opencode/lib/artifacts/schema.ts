@@ -1,4 +1,11 @@
-import type { CanonicalState, ReviewDecision, RoleName } from "../contracts.js";
+import type {
+  CanonicalState,
+  ReviewDecision,
+  ReviewRoleName,
+  ReviewSeverity,
+  ReviewSurface,
+  RoleName,
+} from "../contracts.js";
 
 export const ARTIFACT_KINDS = [
   "plan-skeleton",
@@ -10,6 +17,15 @@ export const ARTIFACT_KINDS = [
 ] as const;
 
 export type ArtifactKind = (typeof ARTIFACT_KINDS)[number];
+export type OwnedArtifactKind = Exclude<ArtifactKind, "review-result">;
+export type PlanReviewArtifactKind = "plan-skeleton" | "detailed-plan";
+export type ResultReviewArtifactKind = "execution-summary";
+
+export interface ReviewFinding {
+  location: string;
+  issue: string;
+  passCriteria: string;
+}
 
 export interface ArtifactRecord<TPayload = unknown> {
   id: string;
@@ -22,21 +38,24 @@ export interface ArtifactRecord<TPayload = unknown> {
 export interface ReviewResultPayload {
   subjectArtifactId: string;
   subjectArtifactKind: ArtifactKind;
+  surface: ReviewSurface;
   decision: ReviewDecision;
+  severity?: ReviewSeverity;
   rejectionCount: number;
+  majorRejectionCount: number;
   gateVisible: true;
-  reviewer: "review";
+  reviewer: ReviewRoleName;
+  findings: ReviewFinding[];
 }
 
 export type ReviewResultArtifact = ArtifactRecord<ReviewResultPayload>;
 
-export const ARTIFACT_OWNERSHIP: Readonly<Record<ArtifactKind, RoleName>> = {
+export const ARTIFACT_OWNERSHIP: Readonly<Record<OwnedArtifactKind, RoleName>> = {
   "plan-skeleton": "plan-builder",
-  "detailed-plan": "power-plan-builder",
+  "detailed-plan": "deep-plan-builder",
   "approval-state": "command-lead",
   "execution-summary": "command-lead",
   "child-task-return-summary": "task-lead",
-  "review-result": "review",
 };
 
 export const APPROVAL_GATE_ARTIFACTS: readonly ArtifactKind[] = [
@@ -47,7 +66,7 @@ export const APPROVAL_GATE_ARTIFACTS: readonly ArtifactKind[] = [
 
 export function createArtifactRecord<TPayload>(input: {
   id: string;
-  kind: ArtifactKind;
+  kind: OwnedArtifactKind;
   state: CanonicalState;
   payload: TPayload;
 }): ArtifactRecord<TPayload> {
@@ -63,20 +82,32 @@ export function createArtifactRecord<TPayload>(input: {
 export function createReviewResultArtifact(input: {
   id: string;
   subjectArtifact: Pick<ArtifactRecord<unknown>, "id" | "kind">;
+  reviewer: ReviewRoleName;
+  surface: ReviewSurface;
   decision: ReviewDecision;
+  severity?: ReviewSeverity;
   rejectionCount: number;
+  majorRejectionCount: number;
+  findings?: ReviewFinding[];
 }): ReviewResultArtifact {
-  return createArtifactRecord({
+  const payload: ReviewResultPayload = {
+    subjectArtifactId: input.subjectArtifact.id,
+    subjectArtifactKind: input.subjectArtifact.kind,
+    surface: input.surface,
+    decision: input.decision,
+    ...(input.severity ? { severity: input.severity } : {}),
+    rejectionCount: input.rejectionCount,
+    majorRejectionCount: input.majorRejectionCount,
+    gateVisible: true,
+    reviewer: input.reviewer,
+    findings: input.findings ?? [],
+  };
+
+  return {
     id: input.id,
     kind: "review-result",
+    owner: input.reviewer,
     state: "reviewed",
-    payload: {
-      subjectArtifactId: input.subjectArtifact.id,
-      subjectArtifactKind: input.subjectArtifact.kind,
-      decision: input.decision,
-      rejectionCount: input.rejectionCount,
-      gateVisible: true,
-      reviewer: "review",
-    },
-  });
+    payload,
+  };
 }
