@@ -1,4 +1,21 @@
 import { ROLE_CONTRACTS, type RoleName } from "../contracts.js";
+import {
+  type AutoModelResult,
+  resolveAutoModels,
+  ROLE_MODEL_PROFILES,
+  ROLE_CAPABILITY_DESCRIPTIONS,
+  type RoleCapability,
+  formatAutoModelReport,
+} from "./role-model-recommendations.js";
+
+export {
+  resolveAutoModels,
+  ROLE_MODEL_PROFILES,
+  ROLE_CAPABILITY_DESCRIPTIONS,
+  type RoleCapability,
+  type AutoModelResult,
+  formatAutoModelReport,
+};
 
 export const CONFIGURABLE_ROLE_NAMES = ROLE_CONTRACTS.map((role) => role.name);
 
@@ -38,24 +55,63 @@ export interface ApplyModelConfigResult {
 export function listProviderModels(config: Record<string, unknown>): ProviderModel[] {
   const providerConfig = config["provider"];
 
-  if (!isRecord(providerConfig)) return [];
+  let models: ProviderModel[] = [];
 
-  const models: ProviderModel[] = [];
+  // Strategy 1: Read from explicit provider.models config (opencode.json "provider" key)
+  if (isRecord(providerConfig)) {
+    for (const [provider, providerValue] of Object.entries(providerConfig)) {
+      if (!isRecord(providerValue)) continue;
 
-  for (const [provider, providerValue] of Object.entries(providerConfig)) {
-    if (!isRecord(providerValue) || !isRecord(providerValue["models"])) continue;
+      // Check for provider.models format
+      if (isRecord(providerValue["models"])) {
+        for (const [model, modelValue] of Object.entries(providerValue["models"])) {
+          const name = isRecord(modelValue) && typeof modelValue["name"] === "string"
+            ? modelValue["name"]
+            : undefined;
 
-    for (const [model, modelValue] of Object.entries(providerValue["models"])) {
-      const name = isRecord(modelValue) && typeof modelValue["name"] === "string"
-        ? modelValue["name"]
-        : undefined;
+          models.push({
+            provider,
+            model,
+            id: `${provider}/${model}`,
+            ...(name ? { name } : {}),
+          });
+        }
+      }
 
-      models.push({
-        provider,
-        model,
-        id: `${provider}/${model}`,
-        ...(name ? { name } : {}),
-      });
+      // Check for direct apiKey format (provider with apiKey but no models list)
+      // e.g. "openai": { "apiKey": "sk-..." } or "anthropic": { "apiKey": "sk-ant-..." }
+      // These providers are connected but don't enumerate models in config
+      if (typeof providerValue["apiKey"] === "string" && !isRecord(providerValue["models"])) {
+        // Provider is connected but models must be discovered at runtime
+      }
+    }
+  }
+
+  // Strategy 2: Read models from agent config (infer from what's already assigned)
+  // This catches cases where providers were connected via /connect but their
+  // models aren't listed in opencode.json — the models may already be configured
+  // on individual agents.
+  const agents = isRecord(config["agent"]) ? config["agent"] : {};
+  const globalModel = typeof config["model"] === "string" ? config["model"] : undefined;
+  const seenIds = new Set(models.map((m) => m.id));
+
+  if (globalModel && globalModel.includes("/")) {
+    const parts = globalModel.split("/");
+    if (parts.length === 2 && !seenIds.has(globalModel)) {
+      models.push({ provider: parts[0]!, model: parts[1]!, id: globalModel });
+      seenIds.add(globalModel);
+    }
+  }
+
+  for (const agentValue of Object.values(agents)) {
+    if (!isRecord(agentValue)) continue;
+    const agentModel = typeof agentValue["model"] === "string" ? agentValue["model"] : undefined;
+    if (agentModel && agentModel.includes("/")) {
+      const parts = agentModel.split("/");
+      if (parts.length === 2 && !seenIds.has(agentModel)) {
+        models.push({ provider: parts[0]!, model: parts[1]!, id: agentModel });
+        seenIds.add(agentModel);
+      }
     }
   }
 

@@ -61,7 +61,7 @@ bounded_lite_model_config
 
 ## AI Install
 
-Copy and paste this prompt to your LLM agent (Claude Code, AmpCode, Cursor, etc.):
+If you already have OpenCode, copy and paste this prompt into it:
 
 ```text
 Install and configure Oh My Lite OpenAgent for OpenCode:
@@ -69,6 +69,12 @@ https://raw.githubusercontent.com/junlin-233/oh-my-lite-openagent/main/AI-INSTAL
 
 Follow the AI installation guide exactly.
 ```
+
+The AI agent will:
+1. Clone the repo and run `npm install` + `npm run install:opencode`
+2. Ask which AI providers you have access to
+3. Call `bounded_lite_model_config({ action: "auto" })` to automatically configure the best model for each role
+4. Verify the installation worked
 
 AI installation instructions live in [`AI-INSTALL.md`](./AI-INSTALL.md).
 
@@ -105,19 +111,48 @@ node scripts/install.mjs --dry-run
 
 ## Role Model Configuration
 
-Run this inside the OpenCode TUI:
+Each role needs a model that fits its capability. Run this inside the OpenCode TUI:
 
 ```text
 /Character-model
 ```
 
-The command lists the current model for each role and the provider models available from your OpenCode config. Tell `command-lead` which roles to update, for example:
+The command supports three modes via the `bounded_lite_model_config` tool:
 
-```text
-Use openai/gpt-5.4 for command-lead, plan-builder, and plan-review. Use openai/gpt-5.4-mini for explore and librarian.
+### auto — Automatically pick the best model for each role
+
+```
+bounded_lite_model_config({ action: "auto" })
 ```
 
-The command writes `agent.<role>.model` into OpenCode config and keeps unrelated provider, model, plugin, and custom agent settings.
+Reads your OpenCode provider config and assigns the best available model to each role based on what the role needs:
+
+| Role              | Needs                  | Best models first                          |
+|-------------------|------------------------|--------------------------------------------|
+| command-lead      | Strongest reasoning    | Claude Opus → GPT-5.4 → Gemini Pro → Sonnet → Kimi K2 → big-pickle |
+| plan-builder      | Strong reasoning       | Claude Opus → GPT-5.4 → Gemini Pro → Sonnet → Kimi K2 → big-pickle |
+| deep-plan-builder | Advisory (weaker OK)   | Claude Sonnet → Kimi K2 → Gem Flash → GPT-5.4 → big-pickle |
+| task-lead         | Mid-tier execution     | Claude Sonnet → Kimi K2 → GPT-5.4 → GPT-4o → big-pickle |
+| explore           | Fast & cheap           | GPT-5.4-mini → Claude Haiku → MiniMax → big-pickle |
+| librarian          | Fast & cheap           | GPT-5.4-mini → Claude Haiku → MiniMax → big-pickle |
+| plan-review       | Strongest reasoning    | GPT-5.4 → Claude Opus → Gemini Pro → big-pickle |
+| result-review     | Strongest reasoning    | GPT-5.4 → Claude Opus → Gemini Pro → big-pickle |
+
+### list — Show current assignments and available models
+
+```
+bounded_lite_model_config({ action: "list" })
+```
+
+### apply — Manually assign models to specific roles
+
+```
+bounded_lite_model_config({ action: "apply", assignments: { "command-lead": "anthropic/claude-opus-4-7", "explore": "openai/gpt-5.4-mini" } })
+```
+
+The `assignments` object maps role names to `provider/model` strings. Only known roles are updated. Unknown roles are skipped. Models not in your provider list get a warning but are still written.
+
+**Typical workflow**: Run `action=auto` first, then review. Use `action=apply` to refine specific roles if needed.
 
 ## Agent Map
 

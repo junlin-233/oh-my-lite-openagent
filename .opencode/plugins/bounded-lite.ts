@@ -9,10 +9,12 @@ import { buildTaskDAG, type TaskDispatchConfig } from "../lib/runtime/plan-dag.j
 import { createRuntimeProfile } from "../lib/runtime/safety.js";
 import {
   applyRoleModelConfig,
+  formatAutoModelReport,
   formatModelConfigReport,
   listProviderModels,
   listProviderModelsFromResponse,
   mergeProviderModels,
+  resolveAutoModels,
   summarizeRoleModels,
 } from "../lib/runtime/model-config.js";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -164,7 +166,24 @@ export function createBoundedLitePlugin(
         },
       },
       bounded_lite_model_config: {
-        description: "List or update per-role OpenCode models for Oh My Lite OpenAgent.",
+        description: `List, auto-configure, or update per-role OpenCode models for Oh My Lite OpenAgent.
+
+Actions:
+- list: Show current role model assignments and available provider models. Call with { "action": "list" }.
+- auto: Automatically assign the best available model to each role based on role capability needs. Call with { "action": "auto" }.
+- apply: Manually assign specific models to roles. Call with { "action": "apply", "assignments": { "role-name": "provider/model-id" } }.
+
+Role capability summary:
+- command-lead (orchestration): needs strongest reasoning
+- plan-builder (planning): needs strong reasoning + structured output
+- deep-plan-builder (advisory-planning): weaker OK, has mandatory plan review
+- task-lead (execution): mid-tier models sufficient
+- explore (fast-retrieval): fast, cheap models preferred
+- librarian (fast-retrieval): fast, cheap models preferred
+- plan-review (critical-review): needs strongest reasoning to catch errors
+- result-review (critical-review): needs strongest reasoning to verify completeness
+
+If no provider models are found, tell the user to configure providers and API keys in their OpenCode config first.`,
         async execute(args, context) {
           const action = typeof args["action"] === "string" ? args["action"] : "list";
           const config = await readOpenCodeConfig();
@@ -174,10 +193,108 @@ export function createBoundedLitePlugin(
           );
 
           if (action === "list") {
+            const roleLines = summarizeRoleModels(config).map((role) => {
+              const source = role.inheritsGlobal ? "inherits global" : "configured";
+              return `- ${role.role}: ${role.effectiveModel ?? "<unset>"} (${source})`;
+            });
+
+            const runtimeModels = await listRuntimeProviderModels(context);
+            const configModels = listProviderModels(config);
+            const debugLines = [
+              `Runtime provider models: ${runtimeModels.length > 0 ? runtimeModels.map((m) => m.id).join(", ") : "none"}`,
+              `Config-inferred models: ${configModels.length > 0 ? configModels.map((m) => m.id).join(", ") : "none"}`,
+            ];
+
+            if (models.length === 0) {
+              return [
+                "Oh My Lite OpenAgent role model configuration",
+                "",
+                "Current role models:",
+                ...roleLines,
+                "",
+                "Available provider models:",
+                "- <none found>",
+                "",
+                "Debug info:",
+                ...debugLines,
+                "",
+                "No provider models were detected from either runtime or config.",
+                "This usually means your OpenCode provider configuration is stored",
+                "in the internal credential store (via /connect) rather than in",
+                "opencode.json's \"provider\" key.",
+                "",
+                "Since you already have models assigned to roles above, you can:",
+                "1. Use action=apply to manually adjust models by name:",
+                '   { "action": "apply", "assignments": { "command-lead": "anthropic/claude-opus-4-7" } }',
+                "2. Or close this session and restart OpenCode, then try action=list again.",
+              ].join("\n");
+            }
+
             return formatModelConfigReport({
               roles: summarizeRoleModels(config),
               models,
             });
+          }
+
+if (action === "auto") {
+            const autoResult = resolveAutoModels(models, config);
+
+            if (models.length === 0 && autoResult.resolved.length === 0) {
+              const roleLines = summarizeRoleModels(config).map((role) => {
+                const source = role.inheritsGlobal ? "inherits global" : "configured";
+                return `- ${role.role}: ${role.effectiveModel ?? "<unset>"} (${source})`;
+              });
+
+              const runtimeModels = await listRuntimeProviderModels(context);
+              const configModels = listProviderModels(config);
+
+              const helpLines = [
+                "Oh My Lite OpenAgent auto model configuration",
+                "",
+                "No provider models found to auto-assign.",
+                "",
+                "Current role models:",
+                ...roleLines,
+                "",
+                "Debug info:",
+                `  Runtime provider models: ${runtimeModels.length > 0 ? runtimeModels.map((m) => m.id).join(", ") : "none"}`,
+                `  Config-inferred models: ${configModels.length > 0 ? configModels.map((m) => m.id).join(", ") : "none"}`,
+                "",
+                "Your providers may be connected via /connect (stored in OpenCode credential",
+                "store, not in opencode.json). If you already have models assigned to roles,",
+                "you can use action=apply to adjust them:",
+                '  { "action": "apply", "assignments": { "command-lead": "anthropic/claude-opus-4-7" } }',
+                "",
+                "If you want to add a provider configuration to opencode.json, the format is:",
+                '  "provider": { "anthropic": { "apiKey": "sk-ant-...", "models": { "claude-opus-4-7": {} } } }',
+              ];
+
+              return helpLines.join("\n");
+            }
+
+            const assignments = autoResult.assignments;
+            const result = applyRoleModelConfig(
+              config,
+              assignments,
+              models.map((model) => model.id),
+            );
+            const configPath = await writeOpenCodeConfig(config);
+
+            const reportLines = [
+              formatAutoModelReport(autoResult),
+              "",
+              formatModelConfigReport({
+                roles: summarizeRoleModels(config),
+                models,
+                changed: result.changed,
+                skipped: result.skipped,
+                warnings: result.warnings,
+              }),
+              "",
+              `Updated ${configPath}. Restart OpenCode or start a new session if the active TUI keeps old model state.`,
+            ];
+
+            return reportLines.join("\n");
           }
 
           if (action === "apply") {
@@ -209,7 +326,7 @@ export function createBoundedLitePlugin(
             ].join("\n");
           }
 
-          throw new Error("bounded_lite_model_config action must be list or apply.");
+          throw new Error("bounded_lite_model_config action must be list, auto, or apply.");
         },
       },
     },
