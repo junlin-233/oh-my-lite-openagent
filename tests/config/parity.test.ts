@@ -51,6 +51,8 @@ describe("config and runtime parity", () => {
     expect(PLANNER_CONTRACTS["plan-builder"].internalOnlyInvocations).toEqual(["normalize"]);
     expect(PLANNER_CONTRACTS["plan-builder"].planReview).toBe("optional");
     expect(PLANNER_CONTRACTS["deep-plan-builder"].planReview).toBe("required");
-    expect(PLANNER_CONTRACTS["deep-plan-builder"].modelStrength).toBe("weak");
+    expect(PLANNER_CONTRACTS["deep-plan-builder"].targetExecutorProfile).toBe(
+      "lower-strength-compatible",
+    );
   });
 });

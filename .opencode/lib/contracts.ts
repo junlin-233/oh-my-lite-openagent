@@ -67,7 +67,8 @@ export interface PlannerContract {
   internalOnlyInvocations: readonly PlannerInvocation[];
   requiresStableSkeleton: boolean;
   outputArtifactKind: "plan-skeleton" | "detailed-plan";
-  modelStrength: "strong" | "weak";
+  plannerModelProfile: "strong" | "review-compensated";
+  targetExecutorProfile: "strong" | "lower-strength-compatible";
   planReview: ReviewRequirement;
 }
 
@@ -148,7 +149,8 @@ export const PLANNER_CONTRACTS: Readonly<Record<PlannerRoleName, PlannerContract
     internalOnlyInvocations: ["normalize"],
     requiresStableSkeleton: false,
     outputArtifactKind: "plan-skeleton",
-    modelStrength: "strong",
+    plannerModelProfile: "strong",
+    targetExecutorProfile: "strong",
     planReview: "optional",
   },
   "deep-plan-builder": {
@@ -157,7 +159,8 @@ export const PLANNER_CONTRACTS: Readonly<Record<PlannerRoleName, PlannerContract
     internalOnlyInvocations: [],
     requiresStableSkeleton: false,
     outputArtifactKind: "detailed-plan",
-    modelStrength: "weak",
+    plannerModelProfile: "review-compensated",
+    targetExecutorProfile: "lower-strength-compatible",
     planReview: "required",
   },
 };

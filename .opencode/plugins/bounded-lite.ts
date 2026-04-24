@@ -6,14 +6,22 @@ import {
 } from "../lib/runtime/plugin-types.js";
 import { resolveCategoryRoute } from "../lib/runtime/categories.js";
 import { buildTaskDAG, type TaskDispatchConfig } from "../lib/runtime/plan-dag.js";
+import { validatePlanReadiness } from "../lib/runtime/plan-readiness.js";
 import { createRuntimeProfile } from "../lib/runtime/safety.js";
 import {
   applyRoleModelConfig,
   formatAutoModelReport,
+  formatModelImportReport,
   formatModelConfigReport,
+  importModelPool,
+  inferModelPoolPolicy,
+  listKnownModelsForCredentialProviders,
   listProviderModels,
   listProviderModelsFromResponse,
   mergeProviderModels,
+  type ModelFamily,
+  type ModelPoolPolicy,
+  type ModelProviderSource,
   resolveAutoModels,
   summarizeRoleModels,
 } from "../lib/runtime/model-config.js";
@@ -27,11 +35,21 @@ export interface BoundedLitePluginOptions {
   enableBackground?: boolean;
   enableBundledMcp?: boolean;
   maxChildDepth?: number;
+  configDir?: string;
+}
+
+export interface NormalizedBoundedLitePluginOptions {
+  mode: "full" | "degraded";
+  enableHooks: boolean;
+  enableBackground: boolean;
+  enableBundledMcp: boolean;
+  maxChildDepth: number;
+  configDir?: string;
 }
 
 export function normalizePluginOptions(
   options: BoundedLitePluginOptions = {},
-): Required<BoundedLitePluginOptions> {
+): NormalizedBoundedLitePluginOptions {
   const mode = options.mode ?? "full";
 
   return {
@@ -40,6 +58,9 @@ export function normalizePluginOptions(
     enableBackground: options.enableBackground ?? mode === "full",
     enableBundledMcp: options.enableBundledMcp ?? false,
     maxChildDepth: options.maxChildDepth ?? MAX_CHILD_ORCHESTRATOR_DEPTH,
+    ...(typeof options.configDir === "string" && options.configDir.trim() !== ""
+      ? { configDir: options.configDir }
+      : {}),
   };
 }
 
@@ -55,8 +76,9 @@ function isRoutingCategory(value: unknown): value is RoutingCategory {
   );
 }
 
-function defaultConfigDir(): string {
+function defaultConfigDir(configDir?: string): string {
   if (process.env.OPENCODE_CONFIG_DIR) return path.resolve(process.env.OPENCODE_CONFIG_DIR);
+  if (configDir) return path.resolve(configDir);
 
   if (process.platform === "win32") {
     return path.join(process.env.APPDATA ?? path.join(os.homedir(), "AppData", "Roaming"), "opencode");
@@ -65,20 +87,40 @@ function defaultConfigDir(): string {
   return path.join(process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config"), "opencode");
 }
 
+function defaultDataDir(): string {
+  if (process.env.OPENCODE_DATA_DIR) return path.resolve(process.env.OPENCODE_DATA_DIR);
+
+  if (process.platform === "win32") {
+    return path.join(process.env.LOCALAPPDATA ?? path.join(os.homedir(), "AppData", "Local"), "opencode");
+  }
+
+  return path.join(process.env.XDG_DATA_HOME ?? path.join(os.homedir(), ".local", "share"), "opencode");
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-async function readOpenCodeConfig(): Promise<Record<string, unknown>> {
-  const configPath = path.join(defaultConfigDir(), "opencode.json");
+async function readOpenCodeConfig(configDir?: string): Promise<Record<string, unknown>> {
+  const configPath = path.join(defaultConfigDir(configDir), "opencode.json");
   const content = await readFile(configPath, "utf8");
   return JSON.parse(content) as Record<string, unknown>;
 }
 
-async function writeOpenCodeConfig(config: Record<string, unknown>): Promise<string> {
-  const configPath = path.join(defaultConfigDir(), "opencode.json");
+async function readOpenCodeAuthProviderIds(): Promise<string[]> {
+  try {
+    const content = await readFile(path.join(defaultDataDir(), "auth.json"), "utf8");
+    const auth = JSON.parse(content) as unknown;
+    return isRecord(auth) ? Object.keys(auth) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function writeOpenCodeConfig(config: Record<string, unknown>, configDir?: string): Promise<string> {
+  const configPath = path.join(defaultConfigDir(configDir), "opencode.json");
   await mkdir(path.dirname(configPath), { recursive: true });
-  await writeFile(`${configPath}.bak`, `${JSON.stringify(await readOpenCodeConfig(), null, 2)}\n`);
+  await writeFile(`${configPath}.bak`, `${JSON.stringify(await readOpenCodeConfig(configDir), null, 2)}\n`);
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
   return configPath;
 }
@@ -108,6 +150,51 @@ async function listRuntimeProviderModels(input: PluginInput): Promise<ReturnType
   } catch {
     return [];
   }
+}
+
+function readModelPoolPolicy(args: Record<string, unknown>): ModelPoolPolicy {
+  const policy = isRecord(args["policy"]) ? args["policy"] : {};
+  const sourceValue = typeof policy["source"] === "string"
+    ? policy["source"]
+    : typeof args["source"] === "string"
+      ? args["source"]
+      : undefined;
+  const source = isModelSourceFilter(sourceValue) ? sourceValue : undefined;
+  const providerPreference = readStringArray(policy["providerPreference"] ?? args["providerPreference"]);
+  const familyPreference = readFamilyArray(policy["familyPreference"] ?? args["familyPreference"]);
+  const allowCodexBackend = typeof policy["allowCodexBackend"] === "boolean"
+    ? policy["allowCodexBackend"]
+    : typeof args["allowCodexBackend"] === "boolean"
+      ? args["allowCodexBackend"]
+      : undefined;
+
+  return {
+    ...(source ? { source } : {}),
+    ...(providerPreference.length > 0 ? { providerPreference } : {}),
+    ...(familyPreference.length > 0 ? { familyPreference } : {}),
+    ...(typeof allowCodexBackend === "boolean" ? { allowCodexBackend } : {}),
+  };
+}
+
+function readStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.trim() !== "")
+    : [];
+}
+
+function readFamilyArray(value: unknown): ModelFamily[] {
+  const valid = new Set<ModelFamily>(["gpt", "claude", "gemini", "kimi", "minimax", "glm", "codex", "other"]);
+  return readStringArray(value).filter((item): item is ModelFamily => valid.has(item as ModelFamily));
+}
+
+function isModelSourceFilter(value: unknown): value is ModelProviderSource | "all" {
+  return (
+    value === "opencode-subscription" ||
+    value === "api-provider" ||
+    value === "gateway" ||
+    value === "unknown" ||
+    value === "all"
+  );
 }
 
 export function createBoundedLitePlugin(
@@ -153,6 +240,15 @@ export function createBoundedLitePlugin(
           return buildTaskDAG(payload, dispatch as Partial<TaskDispatchConfig>);
         },
       },
+      bounded_lite_plan_readiness: {
+        description: "Validate a Plan Builder artifact against readiness gates before Command Lead dispatches execution.",
+        execute(args) {
+          const payload = args["payload"];
+          const dispatch = isRecord(args["dispatch"]) ? args["dispatch"] : {};
+
+          return validatePlanReadiness(payload, dispatch as Partial<TaskDispatchConfig>);
+        },
+      },
       bounded_lite_background: {
         description: "List currently tracked background tasks from the bounded coordinator.",
         execute() {
@@ -166,31 +262,58 @@ export function createBoundedLitePlugin(
         },
       },
       bounded_lite_model_config: {
-        description: `List, auto-configure, or update per-role OpenCode models for Oh My Lite OpenAgent.
+        description: `Import, list, recommend, or update per-role OpenCode models for Oh My Lite OpenAgent.
 
 Actions:
+	- import: Import all available OpenCode model providers by default. Call with { "action": "import" }.
 - list: Show current role model assignments and available provider models. Call with { "action": "list" }.
-- auto: Automatically assign the best available model to each role based on role capability needs. Call with { "action": "auto" }.
+- auto: Recommend role model assignments from the imported model pool based on role capability needs. This does not write config. Call with { "action": "auto" }.
 - apply: Manually assign specific models to roles. Call with { "action": "apply", "assignments": { "role-name": "provider/model-id" } }.
+
+Policy:
+	- source and providerPreference are optional narrowing filters; by default the imported pool includes every discovered provider.
+- allowCodexBackend defaults to false.
+- familyPreference can limit the imported pool, for example { "familyPreference": ["gpt"] } for GPT-family subscription models.
 
 Role capability summary:
 - command-lead (orchestration): needs strongest reasoning
 - plan-builder (planning): needs strong reasoning + structured output
-- deep-plan-builder (advisory-planning): weaker OK, has mandatory plan review
+- deep-plan-builder (advisory-planning): detailed plans for lower-strength executors, has mandatory plan review
 - task-lead (execution): mid-tier models sufficient
 - explore (fast-retrieval): fast, cheap models preferred
 - librarian (fast-retrieval): fast, cheap models preferred
 - plan-review (critical-review): needs strongest reasoning to catch errors
 - result-review (critical-review): needs strongest reasoning to verify completeness
 
-If no provider models are found, tell the user to configure providers and API keys in their OpenCode config first.`,
+AI selection rule:
+- Only choose model IDs returned by action=import or the imported pool used by action=auto.
+- After action=auto, ask the user whether they want to modify the recommendations before calling action=apply.
+
+If no provider models are found, tell the user to configure or connect OpenCode providers first.`,
         async execute(args, context) {
           const action = typeof args["action"] === "string" ? args["action"] : "list";
-          const config = await readOpenCodeConfig();
+          const config = await readOpenCodeConfig(options.configDir);
+          const credentialModels = listKnownModelsForCredentialProviders(
+            await readOpenCodeAuthProviderIds(),
+          );
           const models = mergeProviderModels(
-            await listRuntimeProviderModels(context),
+            mergeProviderModels(await listRuntimeProviderModels(context), credentialModels),
             listProviderModels(config),
           );
+          const inferredPolicy = inferModelPoolPolicy(config, readModelPoolPolicy(args));
+          const poolPolicy = inferredPolicy.policy;
+          const importedPool = importModelPool(models, poolPolicy);
+
+          if (action === "import") {
+            return [
+              inferredPolicy.reason,
+              "",
+              formatModelImportReport({
+                models: importedPool,
+                policy: poolPolicy,
+              }),
+            ].join("\n");
+          }
 
           if (action === "list") {
             const roleLines = summarizeRoleModels(config).map((role) => {
@@ -198,12 +321,16 @@ If no provider models are found, tell the user to configure providers and API ke
               return `- ${role.role}: ${role.effectiveModel ?? "<unset>"} (${source})`;
             });
 
-            const runtimeModels = await listRuntimeProviderModels(context);
-            const configModels = listProviderModels(config);
-            const debugLines = [
-              `Runtime provider models: ${runtimeModels.length > 0 ? runtimeModels.map((m) => m.id).join(", ") : "none"}`,
-              `Config-inferred models: ${configModels.length > 0 ? configModels.map((m) => m.id).join(", ") : "none"}`,
-            ];
+	            const runtimeModels = await listRuntimeProviderModels(context);
+	            const configModels = listProviderModels(config);
+	            const credentialModels = listKnownModelsForCredentialProviders(
+	              await readOpenCodeAuthProviderIds(),
+	            );
+	            const debugLines = [
+	              `Runtime provider models: ${runtimeModels.length > 0 ? runtimeModels.map((m) => m.id).join(", ") : "none"}`,
+	              `Credential fallback models: ${credentialModels.length > 0 ? credentialModels.map((m) => m.id).join(", ") : "none"}`,
+	              `Config-inferred models: ${configModels.length > 0 ? configModels.map((m) => m.id).join(", ") : "none"}`,
+	            ];
 
             if (models.length === 0) {
               return [
@@ -224,9 +351,9 @@ If no provider models are found, tell the user to configure providers and API ke
                 "opencode.json's \"provider\" key.",
                 "",
                 "Since you already have models assigned to roles above, you can:",
-                "1. Use action=apply to manually adjust models by name:",
-                '   { "action": "apply", "assignments": { "command-lead": "anthropic/claude-opus-4-7" } }',
-                "2. Or close this session and restart OpenCode, then try action=list again.",
+                "1. Use action=import to inspect the eligible inferred model pool.",
+                "2. Use action=apply only with model IDs returned by action=import.",
+                '   { "action": "apply", "assignments": { "command-lead": "provider/model" } }',
               ].join("\n");
             }
 
@@ -236,62 +363,60 @@ If no provider models are found, tell the user to configure providers and API ke
             });
           }
 
-if (action === "auto") {
-            const autoResult = resolveAutoModels(models, config);
+          if (action === "auto") {
+            const autoResult = resolveAutoModels(importedPool, config);
 
-            if (models.length === 0 && autoResult.resolved.length === 0) {
+            if (importedPool.length === 0 && autoResult.resolved.length === 0) {
               const roleLines = summarizeRoleModels(config).map((role) => {
                 const source = role.inheritsGlobal ? "inherits global" : "configured";
                 return `- ${role.role}: ${role.effectiveModel ?? "<unset>"} (${source})`;
               });
 
-              const runtimeModels = await listRuntimeProviderModels(context);
-              const configModels = listProviderModels(config);
-
-              const helpLines = [
+	              const runtimeModels = await listRuntimeProviderModels(context);
+	              const configModels = listProviderModels(config);
+	              const credentialModels = listKnownModelsForCredentialProviders(
+	                await readOpenCodeAuthProviderIds(),
+	              );
+	
+	              const helpLines = [
                 "Oh My Lite OpenAgent auto model configuration",
                 "",
-                "No provider models found to auto-assign.",
+                "No imported models found to recommend.",
+                "",
+                inferredPolicy.reason,
+                "",
+                formatModelImportReport({ models: importedPool, policy: poolPolicy }),
                 "",
                 "Current role models:",
                 ...roleLines,
                 "",
-                "Debug info:",
-                `  Runtime provider models: ${runtimeModels.length > 0 ? runtimeModels.map((m) => m.id).join(", ") : "none"}`,
-                `  Config-inferred models: ${configModels.length > 0 ? configModels.map((m) => m.id).join(", ") : "none"}`,
+	                "Debug info:",
+	                `  Runtime provider models: ${runtimeModels.length > 0 ? runtimeModels.map((m) => m.id).join(", ") : "none"}`,
+	                `  Credential fallback models: ${credentialModels.length > 0 ? credentialModels.map((m) => m.id).join(", ") : "none"}`,
+	                `  Config-inferred models: ${configModels.length > 0 ? configModels.map((m) => m.id).join(", ") : "none"}`,
                 "",
-                "Your providers may be connected via /connect (stored in OpenCode credential",
-                "store, not in opencode.json). If you already have models assigned to roles,",
-                "you can use action=apply to adjust them:",
-                '  { "action": "apply", "assignments": { "command-lead": "anthropic/claude-opus-4-7" } }',
-                "",
-                "If you want to add a provider configuration to opencode.json, the format is:",
-                '  "provider": { "anthropic": { "apiKey": "sk-ant-...", "models": { "claude-opus-4-7": {} } } }',
+                "Use action=import first to inspect the available pool.",
+                "The default pool includes every discovered provider unless policy overrides are provided.",
               ];
 
               return helpLines.join("\n");
             }
 
             const assignments = autoResult.assignments;
-            const result = applyRoleModelConfig(
-              config,
-              assignments,
-              models.map((model) => model.id),
-            );
-            const configPath = await writeOpenCodeConfig(config);
-
             const reportLines = [
+              inferredPolicy.reason,
+              "",
               formatAutoModelReport(autoResult),
               "",
               formatModelConfigReport({
                 roles: summarizeRoleModels(config),
-                models,
-                changed: result.changed,
-                skipped: result.skipped,
-                warnings: result.warnings,
+                models: importedPool,
               }),
               "",
-              `Updated ${configPath}. Restart OpenCode or start a new session if the active TUI keeps old model state.`,
+              "Recommended assignments JSON:",
+              JSON.stringify(assignments, null, 2),
+              "",
+              "Preview only. Ask the user whether they want to modify these assignments, then call action=apply to write them.",
             ];
 
             return reportLines.join("\n");
@@ -309,14 +434,17 @@ if (action === "auto") {
             const result = applyRoleModelConfig(
               config,
               assignments as Record<string, unknown>,
-              models.map((model) => model.id),
+              importedPool.map((model) => model.id),
+              {
+                allowUnavailableModels: args["allowUnavailableModels"] === true,
+              },
             );
-            const configPath = await writeOpenCodeConfig(config);
+            const configPath = await writeOpenCodeConfig(config, options.configDir);
 
             return [
               formatModelConfigReport({
                 roles: summarizeRoleModels(config),
-                models,
+                models: importedPool,
                 changed: result.changed,
                 skipped: result.skipped,
                 warnings: result.warnings,
@@ -326,11 +454,16 @@ if (action === "auto") {
             ].join("\n");
           }
 
-          throw new Error("bounded_lite_model_config action must be list, auto, or apply.");
+          throw new Error("bounded_lite_model_config action must be import, list, auto, or apply.");
         },
       },
     },
     "permission.ask"(input, output) {
+      if (input.tool === "bounded_lite_model_config") {
+        output.status = "ask";
+        return;
+      }
+
       if (input.tool.startsWith("bounded_lite_")) {
         output.status = "allow";
       }

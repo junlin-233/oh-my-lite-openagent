@@ -49,7 +49,8 @@ describe("architecture conformance", () => {
       internalOnlyInvocations: ["normalize"],
       requiresStableSkeleton: false,
       outputArtifactKind: "plan-skeleton",
-      modelStrength: "strong",
+      plannerModelProfile: "strong",
+      targetExecutorProfile: "strong",
       planReview: "optional",
     });
     expect(PLANNER_CONTRACTS["deep-plan-builder"]).toEqual({
@@ -58,7 +59,8 @@ describe("architecture conformance", () => {
       internalOnlyInvocations: [],
       requiresStableSkeleton: false,
       outputArtifactKind: "detailed-plan",
-      modelStrength: "weak",
+      plannerModelProfile: "review-compensated",
+      targetExecutorProfile: "lower-strength-compatible",
       planReview: "required",
     });
     expect(ROUTING_CATEGORIES).not.toContain("normalize");

@@ -84,8 +84,8 @@ export function validateArchitectureContracts(): ArchitectureFinding[] {
         PLANNER_CONTRACTS["plan-builder"].internalOnlyInvocations.includes("normalize") &&
         PLANNER_CONTRACTS["plan-builder"].planReview === "optional" &&
         PLANNER_CONTRACTS["deep-plan-builder"].planReview === "required" &&
-        PLANNER_CONTRACTS["deep-plan-builder"].modelStrength === "weak",
-      detail: "Plan Builder keeps optional review while Deep Plan Builder requires plan review for weak-model compensation.",
+        PLANNER_CONTRACTS["deep-plan-builder"].targetExecutorProfile === "lower-strength-compatible",
+      detail: "Plan Builder keeps optional review while Deep Plan Builder requires plan review for detailed lower-strength-executor handoff.",
     },
     {
       name: "max-orchestrator-depth",

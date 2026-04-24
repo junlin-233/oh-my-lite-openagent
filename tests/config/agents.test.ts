@@ -17,10 +17,18 @@ describe("OpenCode agent topology", () => {
   });
 
   it("registers a TUI command for role model configuration", () => {
-    expect(config.command?.["Character-model"]).toMatchObject({
+    expect(config.command?.["agent-models"]).toMatchObject({
       agent: "command-lead",
     });
-    expect(config.command?.["Character-model"]?.template).toContain("bounded_lite_model_config");
+    expect(config.command?.["agent-models"]?.description).toContain("per-agent assignments");
+    expect(config.command?.["agent-models"]?.template).toContain("bounded_lite_model_config");
+    expect(config.command?.["agent-models"]?.template).toContain('action: "import"');
+    expect(config.command?.["agent-models"]?.template).toContain(
+      "includes every discovered provider",
+    );
+    expect(config.command?.["agent-models"]?.template).toContain("opencode-go");
+    expect(config.command?.["agent-models"]?.template).toContain("action=auto is recommendation-only");
+    expect(config.command?.["agent-models"]?.template).toContain("ask whether they want changes");
   });
 
   it("registers eight bounded roles plus disabled built-in overrides", () => {
@@ -133,6 +141,57 @@ describe("OpenCode agent topology", () => {
     expect(promptText).toContain("Result Review");
     expect(promptText).toContain("never a Task Lead child return");
     expect(promptText).not.toContain("OMO_INTERNAL_INITIATOR");
+  });
+
+  it("keeps Command Lead routing thresholds explicit", () => {
+    const promptText = readPrompt("command-lead");
+
+    expect(promptText).toContain("## Routing Thresholds");
+    expect(promptText).toContain("Execute directly when all of these are true");
+    expect(promptText).toContain("Route to Plan Builder when any of these are true");
+    expect(promptText).toContain("Route to Deep Plan Builder when any of these are true");
+    expect(promptText).toContain("lower-strength model");
+    expect(promptText).toContain("detailed plan artifact");
+    expect(promptText).toContain("architecture invariants");
+    expect(promptText).toContain("Do not route to planning only because a task has several mechanical steps");
+    expect(promptText).not.toContain("medium or larger");
+  });
+
+  it("requires Command Lead to gate plan execution on readiness", () => {
+    const promptText = readPrompt("command-lead");
+
+    expect(promptText).toContain("## Plan Readiness Gate");
+    expect(promptText).toContain("Do not dispatch Task Lead work from a plan that fails this gate");
+    expect(promptText).toContain("maturity_level");
+    expect(promptText).toContain("status");
+    expect(promptText).toContain("M3");
+    expect(promptText).toContain("M2");
+    expect(promptText).toContain("bounded_lite_plan_readiness");
+    expect(promptText).toContain("no unresolved major Plan Review finding");
+    expect(promptText).toContain("do not fill missing product, compatibility, architecture, or acceptance decisions yourself");
+    expect(promptText).toContain("route to Deep Plan Builder for a detailed plan");
+    expect(promptText).toContain("escalate with the blockers");
+  });
+
+  it("keeps Plan Builder aligned with the v2.1 plan spec", () => {
+    const promptText = readPrompt("plan-builder");
+
+    expect(promptText).toContain("## Spec v2.1 Compliance");
+    expect(promptText).toContain("plan_schema_version: 2.1");
+    expect(promptText).toContain("maturity_level: M0|M1|M2|M3");
+    expect(promptText).toContain("[User Confirmed]");
+    expect(promptText).toContain("[Repo Observed]");
+    expect(promptText).toContain("[Inferred]");
+    expect(promptText).toContain("[Open Question]");
+    expect(promptText).toContain("basis");
+    expect(promptText).toContain("failure_if_false");
+    expect(promptText).toContain("Not Applicable");
+    expect(promptText).toContain("Deferred");
+    expect(promptText).toContain("Unknown Yet");
+    expect(promptText).toContain("5 turns");
+    expect(promptText).toContain("current-state conflicts");
+    expect(promptText).toContain("target-state gaps");
+    expect(promptText).toContain("never `reviewed` or `M3`");
   });
 
   it("requires every delegating role to use the standard assignment fields", () => {

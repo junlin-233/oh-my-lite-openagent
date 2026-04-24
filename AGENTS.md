@@ -20,7 +20,7 @@
 ## 代码与配置边界
 - `tsconfig.json` 只编译 `.opencode/**/*.ts`、`tests/**/*.ts`、`vitest.config.ts`；仓库根目录其他 `.ts` 文件默认不在构建范围内。
 - `dist/` 是构建产物，源码修改应落在 `.opencode/**` 或 `scripts/install.mjs`，不要把修复直接做在 `dist/`。
-- 角色模型配置命令 `/Character-model` 的模板定义在 `opencode.json`，实际实现是插件工具 `bounded_lite_model_config`，两者要保持语义一致。
+- 角色模型配置命令 `/agent-models` 的模板定义在 `opencode.json`，实际实现是插件工具 `bounded_lite_model_config`，两者要保持语义一致。
 
 ## 安装器与配置合并规则
 - `scripts/install.mjs` 只托管并复制 `.opencode/{agents,plugins,lib}` 到目标 OpenCode 配置目录。
@@ -30,7 +30,8 @@
 
 ## 架构约束（测试会卡）
 - 只能保留 3 个可见模式：`execution`、`planning`、`deep-planning`。
-- 真实角色固定为 7 个：`command-lead`、`plan-builder`、`power-plan-builder`、`task-lead`、`explore`、`librarian`、`review`；另外 `build`、`plan` 是被隐藏的禁用覆盖。
+- 真实角色固定为 8 个：`command-lead`、`plan-builder`、`deep-plan-builder`、`task-lead`、`explore`、`librarian`、`plan-review`、`result-review`；另外 `build`、`plan` 是被隐藏的禁用覆盖。
+- 用户只应看到 3 个入口：`command-lead`、`plan-builder`、`deep-plan-builder`；`task-lead`、`explore`、`librarian`、`plan-review`、`result-review` 必须保持 hidden subagent。
 - 子编排深度上限是 `MAX_CHILD_ORCHESTRATOR_DEPTH = 1`，不要引入第二层 orchestrator。
 - 自定义工具名必须保持 provider-safe，并以 `bounded_lite_` 开头；测试会校验名字不含点号且匹配 `^[a-zA-Z0-9_-]+$`。
 - 权限顺序不是随意的：`task` 权限规则里先放 `"*": "deny"`，因为 OpenCode 按“最后匹配生效”处理，测试会检查这一点。

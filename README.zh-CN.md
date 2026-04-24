@@ -19,7 +19,7 @@
 - 每个角色都参照 OpenCode 的任务追踪风格维护自己的本地 todo 列表，但 todo 不替代 artifact 或 canonical state。
 - `result-review` 是用户可选择调用的可选审查，只审查 Command Lead 的执行摘要/最终整合结果，不审查 Task Lead 子任务返回。
 - 有委派权的角色派遣任务时使用显式模板：`TASK`、`EXPECTED OUTCOME`、`ROLE`、`SCOPE`、`UPSTREAM EVIDENCE`、`REQUIRED TOOLS`、`MUST DO`、`MUST NOT DO`、`CONTEXT`、`DELIVERABLE FORMAT`、`FAILURE RETURN`。
-- 兼容 provider 的插件工具：`bounded_lite_route`、`bounded_lite_plan_dag`、`bounded_lite_background`、`bounded_lite_runtime_profile`、`bounded_lite_model_config`。
+- 兼容 provider 的插件工具：`bounded_lite_route`、`bounded_lite_plan_dag`、`bounded_lite_plan_readiness`、`bounded_lite_background`、`bounded_lite_runtime_profile`、`bounded_lite_model_config`。
 - OpenCode 原生 `build` 和 `plan` 模式会被隐藏并禁用。
 - 全局安装器会保留你已有的 model、provider、API key、插件和自定义 agent。
 
@@ -37,16 +37,16 @@ npm run install:opencode
 ### 启动 OpenCode
 
 ```bash
-oc
+opencode
 ```
 
-安装后插件是全局生效的。你可以在任意项目目录运行 `oc`。
+安装后插件是全局生效的。你可以在任意项目目录运行 `opencode`。
 
 ### 验证
 
 ```bash
-oc debug config
-oc debug agent command-lead
+opencode debug config
+opencode debug agent command-lead
 ```
 
 `command-lead` 应该显示为 `native: false`，并包含以下工具：
@@ -54,6 +54,7 @@ oc debug agent command-lead
 ```text
 bounded_lite_route
 bounded_lite_plan_dag
+bounded_lite_plan_readiness
 bounded_lite_background
 bounded_lite_runtime_profile
 bounded_lite_model_config
@@ -108,16 +109,27 @@ node scripts/install.mjs --dry-run
 在 OpenCode TUI 里运行：
 
 ```text
-/Character-model
+/agent-models
 ```
 
-这个命令会列出每个角色当前使用的模型，以及 OpenCode 配置中可用的 provider 模型。然后告诉 `command-lead` 你想怎么分配，例如：
+这个命令会先导入 OpenCode 能发现的全部可用模型池，再让 AI 在这个模型池内按角色能力给出推荐。默认会包含 `openai`、`opencode`、`opencode-go` 等已连接 provider；当前全局 `model` 只作为上下文，不作为硬过滤条件。Codex 后端模型默认排除。
+
+推荐流程：
 
 ```text
-command-lead、plan-builder 和 plan-review 使用 openai/gpt-5.4。explore 和 librarian 使用 openai/gpt-5.4-mini。
+bounded_lite_model_config({ action: "import" })
+bounded_lite_model_config({ action: "auto" })
 ```
 
-命令会把 `agent.<role>.model` 写入 OpenCode 配置，同时保留无关的 provider、model、插件和自定义 agent 设置。
+`action: "auto"` 只返回推荐，不会写配置。需要先把推荐结果展示给用户，询问是否修改，然后再执行 `action: "apply"`。
+
+手动微调时只能写入导入池里存在的模型，例如：
+
+```text
+bounded_lite_model_config({ action: "apply", assignments: { "command-lead": "openai/gpt-5.4", "explore": "openai/gpt-5.4-mini" } })
+```
+
+命令会把 `agent.<role>.model` 写入 OpenCode 配置，同时保留无关的 provider、model、插件和自定义 agent 设置。默认会拒绝导入池外的模型，避免 AI 编造 provider/model。
 
 ## Agent 列表
 
@@ -184,6 +196,7 @@ Remove-Item -Recurse -Force node_modules, dist
 ```text
 bounded_lite_route
 bounded_lite_plan_dag
+bounded_lite_plan_readiness
 bounded_lite_background
 bounded_lite_runtime_profile
 bounded_lite_model_config
@@ -195,7 +208,7 @@ bounded_lite_model_config
 
 ```bash
 npm run install:opencode
-oc debug config
+opencode debug config
 ```
 
 确认：

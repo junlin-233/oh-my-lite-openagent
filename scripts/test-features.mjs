@@ -67,7 +67,7 @@ function testRoleModelRecommendations() {
   const ROLE_CAPABILITY_DESCRIPTIONS = {
     orchestration: "Needs strongest reasoning model",
     planning: "Needs strong reasoning and structured output",
-    "advisory-planning": "Can use weaker models with mandatory review",
+    "advisory-planning": "Produces detailed plans suitable for lower-strength executors with mandatory review",
     execution: "Can use mid-tier models",
     "fast-retrieval": "Should use fast, cheap models",
     "critical-review": "Needs strongest reasoning to catch errors",
@@ -209,11 +209,12 @@ function testConfigIntegrity() {
   const config = JSON.parse(readFileSync(path.join(ROOT, "opencode.json"), "utf8"));
 
   // 3.1 命令注册
-  assert(config.command && config.command["Character-model"], "/Character-model 命令已注册");
-  const template = config.command["Character-model"].template;
-  assert(template.includes("action=auto"), "命令模板提及 auto 模式");
-  assert(template.includes("action=list"), "命令模板提及 list 模式");
-  assert(template.includes("action=apply"), "命令模板提及 apply 模式");
+  assert(config.command && config.command["agent-models"], "/agent-models 命令已注册");
+  const template = config.command["agent-models"].template;
+  assert(template.includes('action: "import"'), "命令模板提及 import 模式");
+  assert(template.includes('action: "auto"'), "命令模板提及 auto 模式");
+  assert(template.includes("- list:"), "命令模板提及 list 模式");
+  assert(template.includes('action: "apply"'), "命令模板提及 apply 模式");
   assert(template.includes("bounded_lite_model_config"), "命令模板提及工具名");
 
   // 3.2 角色表覆盖
@@ -244,7 +245,7 @@ function testConfigIntegrity() {
   assert(pluginContent.includes('action === "apply"'), "插件支持 apply action");
   assert(pluginContent.includes("resolveAutoModels"), "插件导入 resolveAutoModels");
   assert(pluginContent.includes("formatAutoModelReport"), "插件导入 formatAutoModelReport");
-  assert(pluginContent.includes("auto-configure"), "工具描述包含 auto-configure");
+  assert(pluginContent.includes("Recommend role model assignments"), "工具描述包含 auto 推荐说明");
 }
 
 // ============================================================================
@@ -275,9 +276,9 @@ function testReminder() {
   console.log("  以及原有的 model-config / config / integration 测试。");
   console.log("\n  要验证安装交互式模型配置，请执行：");
   console.log("    node scripts/install.mjs --interactive --dry-run");
-  console.log("\n  要验证 /character model auto，请在 OpenCode 中执行：");
-  console.log("    /character model");
-  console.log("    然后选择 action=auto");
+  console.log("\n  要验证 /agent-models auto，请在 OpenCode 中执行：");
+  console.log("    /agent-models");
+  console.log("    然后先选择 action=import，再选择 action=auto");
 }
 
 // ============================================================================

@@ -8,17 +8,19 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const PLUGIN_FILE = "bounded-lite.ts";
 const MANAGED_DIRS = ["agents", "plugins", "lib"];
 const DEFAULT_PLUGIN_OPTIONS = { mode: "full" };
+const MANAGED_COMMAND_NAMES = new Set([
+  "agent-models",
+  "Character-model",
+]);
 const MANAGED_AGENT_NAMES = new Set([
   "build",
   "plan",
   "command-lead",
   "plan-builder",
-  "power-plan-builder",
   "deep-plan-builder",
   "task-lead",
   "explore",
   "librarian",
-  "review",
   "plan-review",
   "result-review",
 ]);
@@ -66,7 +68,7 @@ const ROLE_MODEL_PROFILES = [
   {
     role: "deep-plan-builder",
     capability: "advisory-planning",
-    description: "Deep planner — can use weaker models (has mandatory review)",
+    description: "Deep planner — produces detailed plans for lower-strength executors",
     recommendations: [
       "claude-sonnet",
       "kimi-k2",
@@ -216,6 +218,24 @@ function matchesPattern(modelId, pattern) {
   return modelId.toLowerCase().includes(pattern.toLowerCase());
 }
 
+function classifyModelProvider(provider) {
+  const normalized = provider.toLowerCase();
+
+  if (["opencode", "opencode-go"].includes(normalized)) {
+    return "opencode-subscription";
+  }
+
+  if (["openai", "anthropic", "google", "github-copilot", "kimi-for-coding"].includes(normalized)) {
+    return "api-provider";
+  }
+
+  if (normalized === "vercel") {
+    return "gateway";
+  }
+
+  return "unknown";
+}
+
 function resolveModelsForProviders(availableModels) {
   const assignments = {};
   const resolved = [];
@@ -223,12 +243,14 @@ function resolveModelsForProviders(availableModels) {
 
   for (const profile of ROLE_MODEL_PROFILES) {
     let bestModel = undefined;
+    let bestModelSource = undefined;
     let matchedPattern = undefined;
 
     for (const pattern of profile.recommendations) {
       const matched = availableModels.find((model) => matchesPattern(model.id, pattern));
       if (matched) {
         bestModel = matched.id;
+        bestModelSource = matched.source;
         matchedPattern = pattern;
         break;
       }
@@ -236,7 +258,7 @@ function resolveModelsForProviders(availableModels) {
 
     if (bestModel) {
       assignments[profile.role] = bestModel;
-      resolved.push({ role: profile.role, model: bestModel, matchedPattern });
+      resolved.push({ role: profile.role, model: bestModel, source: bestModelSource, matchedPattern });
     } else {
       unresolved.push({ role: profile.role, capability: profile.capability });
     }
@@ -315,7 +337,10 @@ function collectModelsFromProviders(providerAnswers) {
     );
   }
 
-  return models;
+  return models.map((model) => ({
+    ...model,
+    source: classifyModelProvider(model.provider),
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -344,7 +369,7 @@ async function promptYesNo(question, defaultValue = false) {
 async function promptProviders() {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     console.log("Non-interactive mode detected. Skipping model provider setup.");
-    console.log("Use '/character model' with action=auto after installation to configure models.");
+    console.log("Use '/agent-models' with action=auto after installation to configure models.");
     return null;
   }
 
@@ -357,7 +382,7 @@ async function promptProviders() {
   console.log("║  This will be used to pick the best model for each role.     ║");
   console.log("║                                                              ║");
   console.log("║  You can always change models later using                    ║");
-  console.log("║  the /character model command in OpenCode.                   ║");
+  console.log("║  the /agent-models command in OpenCode.                      ║");
   console.log("║                                                              ║");
   console.log("╚════════════════════════════════════════════════════════════════╝");
   console.log("");
@@ -385,7 +410,8 @@ function formatModelAssignments(result) {
   for (const item of result.resolved) {
     const profile = ROLE_MODEL_PROFILES.find((p) => p.role === item.role);
     const tag = profile ? `[${profile.capability}]` : "";
-    lines.push(`    ✓ ${item.role.padEnd(20)} → ${item.model.padEnd(35)} ${tag}`);
+    const source = item.source ? `[${item.source}]` : "";
+    lines.push(`    ✓ ${item.role.padEnd(20)} → ${item.model.padEnd(35)} ${tag} ${source}`);
   }
 
   if (result.unresolved.length > 0) {
@@ -496,8 +522,14 @@ function isManagedPluginSpec(spec) {
   return typeof value === "string" && value.includes(PLUGIN_FILE);
 }
 
-function relativePluginSpec() {
-  return ["./.opencode/plugins/bounded-lite.ts", DEFAULT_PLUGIN_OPTIONS];
+function relativePluginSpec(configDir) {
+  return [
+    "./.opencode/plugins/bounded-lite.ts",
+    {
+      ...DEFAULT_PLUGIN_OPTIONS,
+      configDir,
+    },
+  ];
 }
 
 function isRecord(value) {
@@ -514,7 +546,7 @@ function mergeManagedAgent(sourceAgent, existingAgent) {
   };
 }
 
-function mergeConfig(existingConfig, sourceConfig) {
+function mergeConfig(existingConfig, sourceConfig, configDir) {
   const existingPlugins = Array.isArray(existingConfig.plugin)
     ? existingConfig.plugin
     : existingConfig.plugin
@@ -523,7 +555,7 @@ function mergeConfig(existingConfig, sourceConfig) {
 
   const plugins = [
     ...existingPlugins.filter((spec) => !isManagedPluginSpec(spec)),
-    relativePluginSpec(),
+    relativePluginSpec(configDir),
   ];
   const existingAgents = isRecord(existingConfig.agent) ? existingConfig.agent : {};
   const sourceAgents = isRecord(sourceConfig.agent) ? sourceConfig.agent : {};
@@ -546,7 +578,11 @@ function mergeConfig(existingConfig, sourceConfig) {
     default_agent: sourceConfig.default_agent,
     permission: existingConfig.permission ?? sourceConfig.permission,
     command: {
-      ...(existingConfig.command ?? {}),
+      ...Object.fromEntries(
+        Object.entries(existingConfig.command ?? {}).filter(([commandName]) => (
+          !MANAGED_COMMAND_NAMES.has(commandName)
+        )),
+      ),
       ...(sourceConfig.command ?? {}),
     },
     agent: {
@@ -589,7 +625,7 @@ export async function install(options = {}) {
   const sourceConfig = await readJsonIfExists(path.join(rootDir, "opencode.json"));
   const targetConfigPath = path.join(configDir, "opencode.json");
   const existingConfig = await readJsonIfExists(targetConfigPath);
-  let mergedConfig = mergeConfig(existingConfig, sourceConfig);
+  let mergedConfig = mergeConfig(existingConfig, sourceConfig, configDir);
   const sourceOpenCodeDir = path.join(rootDir, ".opencode");
   const targetOpenCodeDir = path.join(configDir, ".opencode");
 
@@ -623,7 +659,7 @@ export async function install(options = {}) {
 
       if (result.unresolved.length > 0) {
         console.log("  Some roles could not be matched. Consider adding more providers.");
-        console.log("  You can use '/character model' in OpenCode to configure them manually.");
+        console.log("  You can use '/agent-models' in OpenCode to configure them manually.");
       }
     }
   }
@@ -648,7 +684,7 @@ async function main() {
   if (args.interactive) {
     console.log(result.dryRun ? "Dry run with model setup complete; no files were written." : "Install with model setup complete.");
     console.log("");
-    console.log("You can reconfigure models anytime using the /character model command in OpenCode.");
+    console.log("You can reconfigure models anytime using the /agent-models command in OpenCode.");
     console.log("Use action=auto for automatic configuration, action=list to view current settings,");
     console.log("or action=apply for manual per-role assignment.");
   } else {
@@ -656,7 +692,7 @@ async function main() {
     console.log("");
     console.log("To configure models for each role, run:");
     console.log("  node scripts/install.mjs --interactive");
-    console.log("Or use the /character model command in OpenCode.");
+    console.log("Or use the /agent-models command in OpenCode.");
   }
 }
 

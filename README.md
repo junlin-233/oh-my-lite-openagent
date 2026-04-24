@@ -19,7 +19,7 @@ This is intentionally lighter than Oh My OpenAgent. No giant runtime, no model l
 - Each role maintains its own local todo list for multi-step work, following OpenCode-style task tracking without replacing artifacts or canonical state.
 - `result-review` is optional and user-selectable. It reviews Command Lead execution summaries/final integrated results, not Task Lead child task returns.
 - Delegating roles use an explicit assignment template: `TASK`, `EXPECTED OUTCOME`, `ROLE`, `SCOPE`, `UPSTREAM EVIDENCE`, `REQUIRED TOOLS`, `MUST DO`, `MUST NOT DO`, `CONTEXT`, `DELIVERABLE FORMAT`, and `FAILURE RETURN`.
-- Provider-safe plugin tools: `bounded_lite_route`, `bounded_lite_plan_dag`, `bounded_lite_background`, `bounded_lite_runtime_profile`, `bounded_lite_model_config`.
+- Provider-safe plugin tools: `bounded_lite_route`, `bounded_lite_plan_dag`, `bounded_lite_plan_readiness`, `bounded_lite_background`, `bounded_lite_runtime_profile`, `bounded_lite_model_config`.
 - OpenCode native `build` and `plan` modes hidden behind disabled overrides.
 - A global installer that preserves your existing model, provider, API key, plugins, and custom agents.
 
@@ -37,16 +37,16 @@ npm run install:opencode
 ### Start OpenCode
 
 ```bash
-oc
+opencode
 ```
 
-After installation, the plugin is global. You can run `oc` from any project directory.
+After installation, the plugin is global. You can run `opencode` from any project directory.
 
 ### Verify
 
 ```bash
-oc debug config
-oc debug agent command-lead
+opencode debug config
+opencode debug agent command-lead
 ```
 
 `command-lead` should be `native: false` and should include:
@@ -54,6 +54,7 @@ oc debug agent command-lead
 ```text
 bounded_lite_route
 bounded_lite_plan_dag
+bounded_lite_plan_readiness
 bounded_lite_background
 bounded_lite_runtime_profile
 bounded_lite_model_config
@@ -73,7 +74,7 @@ Follow the AI installation guide exactly.
 The AI agent will:
 1. Clone the repo and run `npm install` + `npm run install:opencode`
 2. Ask which AI providers you have access to
-3. Call `bounded_lite_model_config({ action: "auto" })` to automatically configure the best model for each role
+3. Call `bounded_lite_model_config({ action: "import" })`, then `action: "auto"` to generate role recommendations from all discovered providers
 4. Verify the installation worked
 
 AI installation instructions live in [`AI-INSTALL.md`](./AI-INSTALL.md).
@@ -114,29 +115,37 @@ node scripts/install.mjs --dry-run
 Each role needs a model that fits its capability. Run this inside the OpenCode TUI:
 
 ```text
-/Character-model
+/agent-models
 ```
 
-The command supports three modes via the `bounded_lite_model_config` tool:
+The command uses the `bounded_lite_model_config` tool. The default workflow is import first, preview recommendations, ask for user changes, then apply.
 
-### auto — Automatically pick the best model for each role
+### import — Load all discovered provider models
+
+```
+bounded_lite_model_config({ action: "import" })
+```
+
+By default this imports every model provider OpenCode can discover, including subscription providers such as `opencode` and `opencode-go`. The current global `model` is context only; it is not a hard import filter. Codex backend models are excluded unless explicitly allowed.
+
+### auto — Recommend the best imported model for each role
 
 ```
 bounded_lite_model_config({ action: "auto" })
 ```
 
-Reads your OpenCode provider config and assigns the best available model to each role based on what the role needs:
+Returns recommended assignments only. It does not write config:
 
 | Role              | Needs                  | Best models first                          |
 |-------------------|------------------------|--------------------------------------------|
-| command-lead      | Strongest reasoning    | Claude Opus → GPT-5.4 → Gemini Pro → Sonnet → Kimi K2 → big-pickle |
-| plan-builder      | Strong reasoning       | Claude Opus → GPT-5.4 → Gemini Pro → Sonnet → Kimi K2 → big-pickle |
-| deep-plan-builder | Advisory (weaker OK)   | Claude Sonnet → Kimi K2 → Gem Flash → GPT-5.4 → big-pickle |
-| task-lead         | Mid-tier execution     | Claude Sonnet → Kimi K2 → GPT-5.4 → GPT-4o → big-pickle |
-| explore           | Fast & cheap           | GPT-5.4-mini → Claude Haiku → MiniMax → big-pickle |
-| librarian          | Fast & cheap           | GPT-5.4-mini → Claude Haiku → MiniMax → big-pickle |
-| plan-review       | Strongest reasoning    | GPT-5.4 → Claude Opus → Gemini Pro → big-pickle |
-| result-review     | Strongest reasoning    | GPT-5.4 → Claude Opus → Gemini Pro → big-pickle |
+| command-lead      | Strongest reasoning    | strongest imported reasoning model |
+| plan-builder      | Strong reasoning       | strongest imported structured planning model |
+| deep-plan-builder | Detailed handoff plans | strong imported planning model with mandatory review |
+| task-lead         | Mid-tier execution     | capable imported implementation model |
+| explore           | Fast & cheap           | fast/cheap imported mini, flash, or highspeed model |
+| librarian         | Fast & cheap           | fast/cheap imported mini, flash, or highspeed model |
+| plan-review       | Strongest reasoning    | strongest imported review model |
+| result-review     | Strongest reasoning    | strongest imported review model |
 
 ### list — Show current assignments and available models
 
@@ -147,12 +156,12 @@ bounded_lite_model_config({ action: "list" })
 ### apply — Manually assign models to specific roles
 
 ```
-bounded_lite_model_config({ action: "apply", assignments: { "command-lead": "anthropic/claude-opus-4-7", "explore": "openai/gpt-5.4-mini" } })
+bounded_lite_model_config({ action: "apply", assignments: { "command-lead": "openai/gpt-5.4", "explore": "openai/gpt-5.4-mini" } })
 ```
 
-The `assignments` object maps role names to `provider/model` strings. Only known roles are updated. Unknown roles are skipped. Models not in your provider list get a warning but are still written.
+The `assignments` object maps role names to `provider/model` strings. Only known roles are updated. Unknown roles are skipped. Models outside the imported pool are rejected by default.
 
-**Typical workflow**: Run `action=auto` first, then review. Use `action=apply` to refine specific roles if needed.
+**Typical workflow**: Run `action=import`, then `action=auto`, ask the user whether they want changes, then use `action=apply`.
 
 ## Agent Map
 
@@ -219,6 +228,7 @@ Use the current plugin version. Tool names must not contain dots. Valid names ar
 ```text
 bounded_lite_route
 bounded_lite_plan_dag
+bounded_lite_plan_readiness
 bounded_lite_background
 bounded_lite_runtime_profile
 bounded_lite_model_config
@@ -230,7 +240,7 @@ Run:
 
 ```bash
 npm run install:opencode
-oc debug config
+opencode debug config
 ```
 
 Confirm:

@@ -12,7 +12,7 @@ https://github.com/junlin-233/oh-my-lite-openagent
 
 Make Oh My Lite OpenAgent work globally for OpenCode with the best model for each role.
 
-After installation, the user should be able to run `oc` from any directory and get `command-lead` as the default agent with the plugin tools loaded, and each role should have an appropriate model assigned.
+After installation, the user should be able to run `opencode` from any directory and get `command-lead` as the default agent with the plugin tools loaded, and each role should have an appropriate model assigned.
 
 ## Step 1: Install
 
@@ -45,29 +45,30 @@ After installing, you MUST configure models for each role. Ask the user:
 - Kimi For Coding (kimi-for-coding)
 - Vercel AI Gateway
 
-Once the user answers, call `bounded_lite_model_config` with `action=auto` inside the OpenCode session. This automatically reads available provider models and assigns the best one to each role based on role capability needs:
+Once the user answers, call `bounded_lite_model_config` with `action=import` inside the OpenCode session. This imports every provider OpenCode can discover, including subscription providers such as `opencode` and `opencode-go`, without writing config. Then call `action=auto` to generate recommendations for each role based on role capability needs:
 
 | Role              | Capability        | Best models in priority order                                                                       |
 |-------------------|-------------------|------------------------------------------------------------------------------------------------------|
-| command-lead      | orchestration     | Claude Opus → GPT-5.4 → Gemini Pro → Claude Sonnet → Kimi K2 → GPT-4o → GLM-5 → MiniMax → big-pickle |
-| plan-builder      | planning          | Claude Opus → GPT-5.4 → Gemini Pro → Claude Sonnet → Kimi K2 → GPT-4o → GLM-5 → MiniMax → big-pickle |
-| deep-plan-builder | advisory-planning | Claude Sonnet → Kimi K2 → Gemini Flash → GPT-5.4 → Claude Opus → GPT-4o → Codex → GLM-5 → MiniMax → big-pickle |
-| task-lead         | execution         | Claude Sonnet → Kimi K2 → GPT-5.4 → Gemini Pro → GPT-4o → Codex → MiniMax → GPT-5-nano → big-pickle |
-| explore           | fast-retrieval    | GPT-5.4-mini → Claude Haiku → MiniMax HighSpeed → MiniMax → Gemini Flash → GPT-5-nano → big-pickle |
-| librarian         | fast-retrieval    | GPT-5.4-mini → Claude Haiku → MiniMax HighSpeed → MiniMax → Gemini Flash → GPT-5-nano → big-pickle |
-| plan-review       | critical-review   | GPT-5.4 → Claude Opus → Gemini Pro → Claude Sonnet → GPT-4o → GLM-5 → MiniMax → big-pickle |
-| result-review     | critical-review   | GPT-5.4 → Claude Opus → Gemini Pro → Claude Sonnet → GPT-4o → GLM-5 → MiniMax → big-pickle |
+| command-lead      | orchestration     | strongest imported reasoning model |
+| plan-builder      | planning          | strongest imported structured planning model |
+| deep-plan-builder | advisory-planning | strong imported planning model with mandatory review |
+| task-lead         | execution         | capable imported implementation model |
+| explore           | fast-retrieval    | fast/cheap imported mini, flash, or highspeed model |
+| librarian         | fast-retrieval    | fast/cheap imported mini, flash, or highspeed model |
+| plan-review       | critical-review   | strongest imported review model |
+| result-review     | critical-review   | strongest imported review model |
 
 Example call:
 
 ```
+bounded_lite_model_config({ action: "import" })
 bounded_lite_model_config({ action: "auto" })
 ```
 
-If `action=auto` doesn't cover all roles (e.g., some providers aren't detected), manually assign models using `action=apply`:
+`action=auto` is preview-only and must not write config. Show the recommendations to the user, ask whether they want to adjust any role, then apply with `action=apply` using only model IDs returned by `action=import`:
 
 ```
-bounded_lite_model_config({ action: "apply", assignments: { "command-lead": "anthropic/claude-opus-4-7", "explore": "openai/gpt-5.4-mini" } })
+bounded_lite_model_config({ action: "apply", assignments: { "command-lead": "openai/gpt-5.4", "explore": "openai/gpt-5.4-mini" } })
 ```
 
 ## Step 3: Verify
@@ -75,8 +76,8 @@ bounded_lite_model_config({ action: "apply", assignments: { "command-lead": "ant
 Run:
 
 ```bash
-oc debug config
-oc debug agent command-lead
+opencode debug config
+opencode debug agent command-lead
 ```
 
 Confirm:
@@ -86,17 +87,18 @@ Confirm:
 - `command-lead` mode is `primary`.
 - `command-lead` tools include `bounded_lite_route`.
 - `command-lead` tools include `bounded_lite_plan_dag`.
+- `command-lead` tools include `bounded_lite_plan_readiness`.
 - `command-lead` tools include `bounded_lite_background`.
 - `command-lead` tools include `bounded_lite_runtime_profile`.
 - `command-lead` tools include `bounded_lite_model_config`.
-- `/Character-model` is registered in OpenCode commands.
+- `/agent-models` is registered in OpenCode commands.
 - `build` mode is `subagent`.
 - `plan` mode is `subagent`.
 
 Then check model assignments:
 
 ```bash
-oc debug config
+opencode debug config
 ```
 
 Each role should have a `model` field with the best available `provider/model` assignment.
@@ -118,6 +120,7 @@ If OpenCode reports invalid tool names, make sure plugin tools use only these na
 ```text
 bounded_lite_route
 bounded_lite_plan_dag
+bounded_lite_plan_readiness
 bounded_lite_background
 bounded_lite_runtime_profile
 bounded_lite_model_config
@@ -138,23 +141,24 @@ Then verify from another directory:
 
 ```bash
 cd /tmp
-oc debug config
-oc debug agent command-lead
+opencode debug config
+opencode debug agent command-lead
 ```
 
-If model auto-configuration did not cover all roles, use `/character model` in OpenCode. Call `bounded_lite_model_config` with `action=list` to see what's available, then `action=apply` with specific assignments.
+If model auto-configuration did not cover all roles, use `/agent-models` in OpenCode. Call `bounded_lite_model_config` with `action=import` to inspect the eligible inferred pool, then `action=apply` with specific assignments from that pool.
 
-## How /character model Works
+## How /agent-models Works
 
-Inside OpenCode, type `/character model`. The command-lead agent will call `bounded_lite_model_config` with one of three actions:
+Inside OpenCode, type `/agent-models`. The command-lead agent will call `bounded_lite_model_config` with one of four actions:
 
-- **`action=auto`**: Read available provider models and assign the best one to each role automatically.
-- **`action=list`**: Show every role's current model and all models available from your providers.
-- **`action=apply`**: Manually assign specific models. Example: `{ action: "apply", assignments: { "command-lead": "anthropic/claude-opus-4-7", "explore": "openai/gpt-5.4-mini" } }`
+- **`action=import`**: Read all discovered provider models without writing config.
+- **`action=auto`**: Generate recommended role assignments only (no config write).
+- **`action=list`**: Show every role's current model and all discovered models.
+- **`action=apply`**: Manually assign specific imported models. Example: `{ action: "apply", assignments: { "command-lead": "openai/gpt-5.4", "explore": "openai/gpt-5.4-mini" } }`
 
 ## Success Condition
 
 Installation and model configuration is complete when:
 
-1. `oc debug agent command-lead` shows `native: false` and all `bounded_lite_*` tools are present.
-2. Each role has a `model` field in `oc debug config` matching one of the user's available provider models.
+1. `opencode debug agent command-lead` shows `native: false` and all `bounded_lite_*` tools are present.
+2. Each role has a `model` field in `opencode debug config` matching one of the user's available provider models.

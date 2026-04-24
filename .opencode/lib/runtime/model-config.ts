@@ -34,6 +34,43 @@ export interface ProviderModel {
   model: string;
   id: string;
   name?: string;
+  source?: ModelProviderSource;
+  family?: ModelFamily;
+  origin?: ModelOrigin;
+}
+
+export type ModelProviderSource =
+  | "opencode-subscription"
+  | "api-provider"
+  | "gateway"
+  | "unknown";
+
+export type ModelFamily =
+  | "gpt"
+  | "claude"
+  | "gemini"
+  | "kimi"
+  | "minimax"
+  | "glm"
+  | "codex"
+  | "other";
+
+export type ModelOrigin =
+  | "opencode-json-provider"
+  | "runtime-provider-list"
+  | "configured-model"
+  | "credential-provider-fallback";
+
+export interface ModelPoolPolicy {
+  source?: ModelProviderSource | "all";
+  providerPreference?: readonly string[];
+  familyPreference?: readonly ModelFamily[];
+  allowCodexBackend?: boolean;
+}
+
+export interface InferredModelPoolPolicy {
+  policy: ModelPoolPolicy;
+  reason: string;
 }
 
 export interface ApplyModelConfigResult {
@@ -74,6 +111,9 @@ export function listProviderModels(config: Record<string, unknown>): ProviderMod
             model,
             id: `${provider}/${model}`,
             ...(name ? { name } : {}),
+            source: classifyModelProvider(provider),
+            family: classifyModelFamily(`${provider}/${model}`),
+            origin: "opencode-json-provider",
           });
         }
       }
@@ -98,7 +138,14 @@ export function listProviderModels(config: Record<string, unknown>): ProviderMod
   if (globalModel && globalModel.includes("/")) {
     const parts = globalModel.split("/");
     if (parts.length === 2 && !seenIds.has(globalModel)) {
-      models.push({ provider: parts[0]!, model: parts[1]!, id: globalModel });
+      models.push({
+        provider: parts[0]!,
+        model: parts[1]!,
+        id: globalModel,
+        source: classifyModelProvider(parts[0]!),
+        family: classifyModelFamily(globalModel),
+        origin: "configured-model",
+      });
       seenIds.add(globalModel);
     }
   }
@@ -109,7 +156,14 @@ export function listProviderModels(config: Record<string, unknown>): ProviderMod
     if (agentModel && agentModel.includes("/")) {
       const parts = agentModel.split("/");
       if (parts.length === 2 && !seenIds.has(agentModel)) {
-        models.push({ provider: parts[0]!, model: parts[1]!, id: agentModel });
+        models.push({
+          provider: parts[0]!,
+          model: parts[1]!,
+          id: agentModel,
+          source: classifyModelProvider(parts[0]!),
+          family: classifyModelFamily(agentModel),
+          origin: "configured-model",
+        });
         seenIds.add(agentModel);
       }
     }
@@ -143,6 +197,9 @@ export function listProviderModelsFromResponse(response: unknown): ProviderModel
         model: modelID,
         id: `${providerID}/${modelID}`,
         ...(name ? { name } : {}),
+        source: classifyModelProvider(providerID),
+        family: classifyModelFamily(`${providerID}/${modelID}`),
+        origin: "runtime-provider-list",
       });
     }
   }
@@ -155,6 +212,83 @@ export function mergeProviderModels(
   fallback: readonly ProviderModel[],
 ): ProviderModel[] {
   return dedupeModels([...primary, ...fallback]);
+}
+
+export function listKnownModelsForCredentialProviders(providerIds: readonly string[]): ProviderModel[] {
+  const connectedProviders = new Set(providerIds.map((provider) => provider.toLowerCase()));
+  const models: ProviderModel[] = [];
+
+  if (connectedProviders.has("opencode")) {
+    models.push(
+      { provider: "opencode", model: "claude-opus-4-7", id: "opencode/claude-opus-4-7" },
+      { provider: "opencode", model: "claude-sonnet-4-6", id: "opencode/claude-sonnet-4-6" },
+      { provider: "opencode", model: "gpt-5.4", id: "opencode/gpt-5.4" },
+      { provider: "opencode", model: "big-pickle", id: "opencode/big-pickle" },
+      { provider: "opencode", model: "kimi-k2.5", id: "opencode/kimi-k2.5" },
+    );
+  }
+
+  if (connectedProviders.has("opencode-go")) {
+    models.push(
+      { provider: "opencode-go", model: "kimi-k2.5", id: "opencode-go/kimi-k2.5" },
+      { provider: "opencode-go", model: "minimax-m2.7", id: "opencode-go/minimax-m2.7" },
+      { provider: "opencode-go", model: "minimax-m2.7-highspeed", id: "opencode-go/minimax-m2.7-highspeed" },
+      { provider: "opencode-go", model: "glm-5", id: "opencode-go/glm-5" },
+    );
+  }
+
+  return dedupeModels(models.map((model) => withModelMetadata({
+    ...model,
+    origin: "credential-provider-fallback",
+  })));
+}
+
+export function importModelPool(
+  models: readonly ProviderModel[],
+  policy: ModelPoolPolicy = {},
+): ProviderModel[] {
+  const source = policy.source ?? "all";
+  const allowCodexBackend = policy.allowCodexBackend ?? false;
+  const providerPreference = new Set(
+    (policy.providerPreference ?? []).map((provider) => provider.toLowerCase()),
+  );
+  const familyPreference = new Set(policy.familyPreference ?? []);
+
+  return dedupeModels(models.map(withModelMetadata).filter((model) => {
+    if (source !== "all" && model.source !== source) return false;
+    if (providerPreference.size > 0 && !providerPreference.has(model.provider.toLowerCase())) return false;
+    if (familyPreference.size > 0 && !familyPreference.has(model.family ?? "other")) return false;
+    if (!allowCodexBackend && isCodexModel(model)) return false;
+    return true;
+  }));
+}
+
+export function inferModelPoolPolicy(
+  config: Record<string, unknown>,
+  explicitPolicy: ModelPoolPolicy = {},
+): InferredModelPoolPolicy {
+  const globalModel = typeof config["model"] === "string" ? config["model"] : undefined;
+  const provider = globalModel?.includes("/") ? globalModel.split("/")[0] : undefined;
+  const basePolicy: ModelPoolPolicy = {
+    source: "all",
+    allowCodexBackend: false,
+  };
+  const source = explicitPolicy.source ?? basePolicy.source;
+  const providerPreference = explicitPolicy.providerPreference ?? basePolicy.providerPreference;
+  const familyPreference = explicitPolicy.familyPreference;
+  const allowCodexBackend = explicitPolicy.allowCodexBackend ?? basePolicy.allowCodexBackend;
+
+  return {
+    policy: {
+      ...(source ? { source } : {}),
+      ...(providerPreference ? { providerPreference } : {}),
+      ...(familyPreference ? { familyPreference } : {}),
+      ...(typeof allowCodexBackend === "boolean" ? { allowCodexBackend } : {}),
+    },
+    reason: provider
+      ? `Global model ${globalModel} detected; importing all discovered OpenCode model providers by default.`
+      : "No global model was configured; importing all discovered OpenCode model providers by default.",
+  };
 }
 
 export function summarizeRoleModels(config: Record<string, unknown>): RoleModelSummary[] {
@@ -181,6 +315,7 @@ export function applyRoleModelConfig(
   config: Record<string, unknown>,
   assignments: Record<string, unknown>,
   availableModelIds: readonly string[] = [],
+  options: { allowUnavailableModels?: boolean } = {},
 ): ApplyModelConfigResult {
   const agents = ensureRecord(config, "agent");
   const validRoles = new Set<string>(CONFIGURABLE_ROLE_NAMES);
@@ -207,7 +342,17 @@ export function applyRoleModelConfig(
       continue;
     }
 
+    if (availableModels.size === 0 && !options.allowUnavailableModels) {
+      skipped.push({ role, reason: "no imported model pool is available" });
+      continue;
+    }
+
     if (availableModels.size > 0 && !availableModels.has(model)) {
+      if (!options.allowUnavailableModels) {
+        skipped.push({ role, reason: "model is not in the imported model pool" });
+        continue;
+      }
+
       warnings.push({
         role: role as RoleName,
         warning: "model was not found in the provider list; writing it anyway",
@@ -247,7 +392,12 @@ export function formatModelConfigReport(input: {
     "Available provider models:",
     ...(
       input.models.length > 0
-        ? input.models.map((model) => `- ${model.id}${model.name ? ` (${model.name})` : ""}`)
+        ? input.models.map((model) => {
+          const source = model.source ?? classifyModelProvider(model.provider);
+          const family = model.family ?? classifyModelFamily(model.id);
+          const origin = model.origin ? ` ${model.origin}` : "";
+          return `- ${model.id}${model.name ? ` (${model.name})` : ""} [${source}/${family}${origin}]`;
+        })
         : ["- <none found in opencode.json provider config>"]
     ),
   ];
@@ -278,6 +428,41 @@ export function formatModelConfigReport(input: {
   return lines.join("\n");
 }
 
+export function formatModelImportReport(input: {
+  models: ProviderModel[];
+  policy?: ModelPoolPolicy;
+}): string {
+  const source = input.policy?.source ?? "all";
+  const allowCodexBackend = input.policy?.allowCodexBackend ?? false;
+  const lines = [
+    "Oh My Lite OpenAgent imported model pool",
+    "",
+    `Source filter: ${source}`,
+    `Codex backend models: ${allowCodexBackend ? "allowed" : "excluded"}`,
+    "",
+    "Imported models:",
+    ...(
+      input.models.length > 0
+        ? input.models.map((model) => {
+          const modelSource = model.source ?? classifyModelProvider(model.provider);
+          const family = model.family ?? classifyModelFamily(model.id);
+          return `- ${model.id} [${modelSource}/${family}]`;
+        })
+        : ["- <none>"]
+    ),
+  ];
+
+  if (input.models.length === 0) {
+    lines.push(
+      "",
+      "No usable models were imported.",
+      "Connect or configure OpenCode providers, or pass an explicit policy if you want to inspect a narrower pool.",
+    );
+  }
+
+  return lines.join("\n");
+}
+
 function ensureRecord(parent: Record<string, unknown>, key: string): Record<string, unknown> {
   const value = parent[key];
 
@@ -296,6 +481,59 @@ function dedupeModels(models: readonly ProviderModel[]): ProviderModel[] {
   }
 
   return [...seen.values()].sort((left, right) => left.id.localeCompare(right.id));
+}
+
+export function classifyModelProvider(provider: string): ModelProviderSource {
+  const normalized = provider.toLowerCase();
+
+  if (
+    normalized === "opencode" ||
+    normalized === "opencode-go"
+  ) {
+    return "opencode-subscription";
+  }
+
+  if (
+    normalized === "openai" ||
+    normalized === "anthropic" ||
+    normalized === "google" ||
+    normalized === "github-copilot" ||
+    normalized === "kimi-for-coding"
+  ) {
+    return "api-provider";
+  }
+
+  if (normalized === "vercel") {
+    return "gateway";
+  }
+
+  return "unknown";
+}
+
+export function classifyModelFamily(modelId: string): ModelFamily {
+  const normalized = modelId.toLowerCase();
+
+  if (normalized.includes("codex")) return "codex";
+  if (normalized.includes("claude")) return "claude";
+  if (normalized.includes("gemini")) return "gemini";
+  if (normalized.includes("kimi") || normalized.includes("k2")) return "kimi";
+  if (normalized.includes("minimax")) return "minimax";
+  if (normalized.includes("glm")) return "glm";
+  if (normalized.includes("gpt")) return "gpt";
+
+  return "other";
+}
+
+export function isCodexModel(model: ProviderModel): boolean {
+  return (model.family ?? classifyModelFamily(model.id)) === "codex";
+}
+
+function withModelMetadata(model: ProviderModel): ProviderModel {
+  return {
+    ...model,
+    source: model.source ?? classifyModelProvider(model.provider),
+    family: model.family ?? classifyModelFamily(model.id),
+  };
 }
 
 function extractProviders(payload: unknown): unknown[] {

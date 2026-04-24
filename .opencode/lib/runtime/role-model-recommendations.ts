@@ -2,14 +2,14 @@
  * Role model recommendations for Oh My Lite OpenAgent.
  *
  * Adapted from oh-my-openagent's model-requirements.ts for omo-lite's
- * seven-role architecture. Each role has a capability descriptor that
+ * eight-role architecture. Each role has a capability descriptor that
  * determines what kind of model it needs, and a priority-ordered list
  * of model recommendations.
  *
  * Role capability mapping (from omo roles):
  *   command-lead    ← sisyphus     : needs strongest reasoning (orchestration)
  *   plan-builder    ← prometheus   : needs strong reasoning + structured output (planning)
- *   deep-plan-builder ← metis     : can use weaker models, has mandatory review (advisory-planning)
+ *   deep-plan-builder ← metis     : detailed plans for lower-strength executors, with mandatory review (advisory-planning)
  *   task-lead       ← sisyphus-junior : mid-tier execution (execution)
  *   explore         ← explore      : fast, cheap (fast-retrieval)
  *   librarian       ← librarian    : fast, cheap (fast-retrieval)
@@ -33,6 +33,9 @@ export interface ProviderModel {
   model: string;
   id: string;
   name?: string;
+  source?: "opencode-subscription" | "api-provider" | "gateway" | "unknown";
+  family?: "gpt" | "claude" | "gemini" | "kimi" | "minimax" | "glm" | "codex" | "other";
+  origin?: "opencode-json-provider" | "runtime-provider-list" | "configured-model" | "credential-provider-fallback";
 }
 
 export type RoleCapability =
@@ -88,7 +91,7 @@ export const ROLE_CAPABILITY_DESCRIPTIONS: Readonly<Record<RoleCapability, strin
   planning:
     "Needs strong reasoning and structured output. This role generates executable plans with dependencies and acceptance criteria.",
   "advisory-planning":
-    "Can use slightly weaker models because mandatory plan review compensates for lower reasoning quality. Still benefits from strong models when available.",
+    "Produces detailed plans suitable for lower-strength executors. Mandatory plan review compensates for the higher handoff risk.",
   execution:
     "Can use mid-tier models. This role executes bounded tasks with clear scope and deliverables.",
   "fast-retrieval":
@@ -146,9 +149,9 @@ export const ROLE_MODEL_PROFILES: readonly RoleModelProfile[] = [
   {
     role: "deep-plan-builder",
     capability: "advisory-planning",
-    description: "Deep planner on weaker models — mandatory plan review compensates for lower reasoning quality.",
+    description: "Deep planner — produces detailed plans suitable for lower-strength executors.",
     recommendations: [
-      // This role CAN use weaker models because mandatory review compensates
+      // This role produces detailed plans that lower-strength executors can follow.
       { pattern: "claude-sonnet", reason: "Strong planning with good context handling" },
       { pattern: "kimi-k2", reason: "Good reasoning for planning tasks" },
       { pattern: "gemini-3-flash", reason: "Fast and capable for advisory planning" },
@@ -158,7 +161,7 @@ export const ROLE_MODEL_PROFILES: readonly RoleModelProfile[] = [
       { pattern: "gpt-5.3-codex", reason: "Reasonable coding-focused alternative" },
       { pattern: "glm-5", reason: "Reasonable Chinese-developed alternative" },
       { pattern: "minimax-m2", reason: "Budget fallback with mandatory review" },
-      { pattern: "big-pickle", reason: "Free fallback — review compensates" },
+      { pattern: "big-pickle", reason: "Free fallback with mandatory review" },
     ],
   },
   {

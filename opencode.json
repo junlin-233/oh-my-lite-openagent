@@ -1,18 +1,31 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "default_agent": "command-lead",
-  "plugin": [["./.opencode/plugins/bounded-lite.ts", { "mode": "full" }]],
+  "plugin": [
+    [
+      "./.opencode/plugins/bounded-lite.ts",
+      {
+        "mode": "full"
+      }
+    ]
+  ],
   "command": {
-    "Character-model": {
-      "description": "Configure Oh My Lite OpenAgent character role models from the OpenCode TUI.",
+    "agent-models": {
+      "description": "Import available OpenCode provider models, preview recommended per-agent assignments, and apply them after user confirmation.",
       "agent": "command-lead",
-      "template": "Configure per-role models for Oh My Lite OpenAgent.\n\n## How to use\n\nCall the tool `bounded_lite_model_config` with the `action` parameter:\n\n### action=auto — Auto-configure all roles\n\nBest model for each role is picked automatically based on what the role needs:\n\n| Role              | Needs                  | Best models first                          |\n|-------------------|------------------------|--------------------------------------------|\n| command-lead      | Strongest reasoning    | Claude Opus → GPT-5.4 → Gemini Pro → Claude Sonnet → Kimi K2 → GPT-4o → GLM-5 → MiniMax → big-pickle |\n| plan-builder      | Strong reasoning       | Claude Opus → GPT-5.4 → Gemini Pro → Claude Sonnet → Kimi K2 → GPT-4o → GLM-5 → MiniMax → big-pickle |\n| deep-plan-builder | Advisory (weaker OK)   | Claude Sonnet → Kimi K2 → Gemini Flash → GPT-5.4 → Claude Opus → GPT-4o → Codex → GLM-5 → MiniMax → big-pickle |\n| task-lead         | Mid-tier execution      | Claude Sonnet → Kimi K2 → GPT-5.4 → Gemini Pro → GPT-4o → Codex → MiniMax → GPT-5-nano → big-pickle |\n| explore           | Fast & cheap            | GPT-5.4-mini → Claude Haiku → MiniMax HighSpeed → MiniMax → Gemini Flash → GPT-5-nano → big-pickle |\n| librarian         | Fast & cheap            | GPT-5.4-mini → Claude Haiku → MiniMax HighSpeed → MiniMax → Gemini Flash → GPT-5-nano → big-pickle |\n| plan-review       | Strongest reasoning     | GPT-5.4 → Claude Opus → Gemini Pro → Claude Sonnet → GPT-4o → GLM-5 → MiniMax → big-pickle |\n| result-review     | Strongest reasoning     | GPT-5.4 → Claude Opus → Gemini Pro → Claude Sonnet → GPT-4o → GLM-5 → MiniMax → big-pickle |\n\nExample call:\n```\nbounded_lite_model_config({ action: \"auto\" })\n```\nThis reads your OpenCode provider config, picks the best available model for each role, and writes the assignments.\n\n### action=list — Show current config and available models\n\nExample call:\n```\nbounded_lite_model_config({ action: \"list\" })\n```\nShows every role's current model and all models available from your providers.\n\n### action=apply — Manually assign specific models\n\nExample call:\n```\nbounded_lite_model_config({ action: \"apply\", assignments: { \"command-lead\": \"anthropic/claude-opus-4-7\", \"explore\": \"openai/gpt-5.4-mini\" } })\n```\nThe `assignments` object maps role names to `provider/model` strings. Only known roles are updated. Unknown roles are skipped. Models not in your provider list get a warning but are still written.\n\n## Typical workflow\n\n1. Run `action=auto` first to get the best automatic setup.\n2. Review the result. If you want to change specific roles, use `action=apply`.\n3. Use `action=list` anytime to check current state.\n\nPreserve unrelated OpenCode config. Do not remove existing provider, model, or API key settings."
+      "template": "Configure model assignments for Oh My Lite OpenAgent roles.\n\n## Goal\n\nUse AI to recommend role models from all available OpenCode model providers. The AI must not invent provider/model IDs.\n\n## Required Workflow\n\n1. Import the available model pool. By default this includes every discovered provider, including OpenCode subscription providers such as opencode and opencode-go. The current global model is context only and must not be used as a hard import filter.\n\n```\nbounded_lite_model_config({ action: \"import\" })\n```\n\n2. Ask the tool to generate recommended assignments. This is a preview only and must not write config.\n\n```\nbounded_lite_model_config({ action: \"auto\" })\n```\n\n3. Show the recommended assignments to the user and ask whether they want changes. If the user wants changes, revise only by choosing model IDs returned by action=import.\n\n4. Apply only after the user accepts the recommendations or gives modifications.\n\n```\nbounded_lite_model_config({\n  action: \"apply\",\n  assignments: {\n    \"command-lead\": \"provider/model\",\n    \"explore\": \"provider/model\"\n  }\n})\n```\n\n## Role Selection Guidance\n\n| Role              | Need                  | Selection guidance |\n|-------------------|-----------------------|--------------------|\n| command-lead      | Strongest reasoning   | strongest imported reasoning model |\n| plan-builder      | Strong planning       | strongest imported structured planning model |\n| deep-plan-builder | Detailed handoff plan | strong imported planning model; mandatory review compensates handoff risk |\n| task-lead         | Bounded execution     | capable imported implementation model |\n| explore           | Fast retrieval        | fast/cheap imported mini, flash, or highspeed model |\n| librarian         | Fast research         | fast/cheap imported mini, flash, or highspeed model |\n| plan-review       | Critical review       | strongest imported review model |\n| result-review     | Critical review       | strongest imported review model |\n\n## Rules\n\n- action=auto is recommendation-only. It does not write config.\n- action=apply is the only step that writes agent.<role>.model.\n- apply rejects models outside the imported pool by default.\n- allowCodexBackend defaults to false.\n- Use explicit policy only when the user asks to narrow source, provider, or family.\n- Preserve unrelated OpenCode config. Do not remove existing provider, model, or API key settings."
     }
   },
   "permission": {
-    "edit": { "*": "ask" },
-    "bash": { "*": "ask" },
-    "task": { "*": "deny" }
+    "edit": {
+      "*": "ask"
+    },
+    "bash": {
+      "*": "ask"
+    },
+    "task": {
+      "*": "deny"
+    }
   },
   "agent": {
     "command-lead": {
@@ -44,14 +57,18 @@
           "librarian": "allow",
           "plan-review": "allow"
         },
-        "edit": { "*": "deny" },
-        "bash": { "*": "deny" }
+        "edit": {
+          "*": "deny"
+        },
+        "bash": {
+          "*": "deny"
+        }
       }
     },
     "deep-plan-builder": {
       "mode": "all",
       "color": "#ff0000",
-      "description": "Visible deep planner using mandatory plan review to compensate a weaker planning model.",
+      "description": "Visible deep planner that produces detailed handoff plans for lower-strength executors with mandatory plan review.",
       "prompt": "{file:./.opencode/agents/deep-plan-builder.md}",
       "permission": {
         "task": {
@@ -60,8 +77,12 @@
           "librarian": "allow",
           "plan-review": "allow"
         },
-        "edit": { "*": "deny" },
-        "bash": { "*": "deny" }
+        "edit": {
+          "*": "deny"
+        },
+        "bash": {
+          "*": "deny"
+        }
       }
     },
     "build": {
@@ -69,9 +90,15 @@
       "hidden": true,
       "description": "Disabled built-in OpenCode build mode; use command-lead.",
       "permission": {
-        "task": { "*": "deny" },
-        "edit": { "*": "deny" },
-        "bash": { "*": "deny" },
+        "task": {
+          "*": "deny"
+        },
+        "edit": {
+          "*": "deny"
+        },
+        "bash": {
+          "*": "deny"
+        },
         "*": "deny"
       }
     },
@@ -80,9 +107,15 @@
       "hidden": true,
       "description": "Disabled built-in OpenCode plan mode; use plan-builder or deep-plan-builder.",
       "permission": {
-        "task": { "*": "deny" },
-        "edit": { "*": "deny" },
-        "bash": { "*": "deny" },
+        "task": {
+          "*": "deny"
+        },
+        "edit": {
+          "*": "deny"
+        },
+        "bash": {
+          "*": "deny"
+        },
         "*": "deny"
       }
     },
@@ -105,9 +138,15 @@
       "description": "Read-only local exploration of files, structure, and code context.",
       "prompt": "{file:./.opencode/agents/explore.md}",
       "permission": {
-        "task": { "*": "deny" },
-        "edit": { "*": "deny" },
-        "bash": { "*": "deny" },
+        "task": {
+          "*": "deny"
+        },
+        "edit": {
+          "*": "deny"
+        },
+        "bash": {
+          "*": "deny"
+        },
         "webfetch": "deny",
         "websearch": "deny"
       }
@@ -118,9 +157,15 @@
       "description": "External documentation and OSS reference lookup with no edit authority.",
       "prompt": "{file:./.opencode/agents/librarian.md}",
       "permission": {
-        "task": { "*": "deny" },
-        "edit": { "*": "deny" },
-        "bash": { "*": "deny" },
+        "task": {
+          "*": "deny"
+        },
+        "edit": {
+          "*": "deny"
+        },
+        "bash": {
+          "*": "deny"
+        },
         "webfetch": "allow",
         "websearch": "allow"
       }
@@ -131,9 +176,16 @@
       "description": "Plan review specialist that evaluates plan artifacts and may request read-only Explore evidence.",
       "prompt": "{file:./.opencode/agents/plan-review.md}",
       "permission": {
-        "task": { "*": "deny", "explore": "allow" },
-        "edit": { "*": "deny" },
-        "bash": { "*": "deny" }
+        "task": {
+          "*": "deny",
+          "explore": "allow"
+        },
+        "edit": {
+          "*": "deny"
+        },
+        "bash": {
+          "*": "deny"
+        }
       }
     },
     "result-review": {
@@ -142,9 +194,16 @@
       "description": "Optional result review specialist for Command Lead execution summaries, with read-only Explore evidence when needed.",
       "prompt": "{file:./.opencode/agents/result-review.md}",
       "permission": {
-        "task": { "*": "deny", "explore": "allow" },
-        "edit": { "*": "deny" },
-        "bash": { "*": "deny" }
+        "task": {
+          "*": "deny",
+          "explore": "allow"
+        },
+        "edit": {
+          "*": "deny"
+        },
+        "bash": {
+          "*": "deny"
+        }
       }
     }
   }
