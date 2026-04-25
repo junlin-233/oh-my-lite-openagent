@@ -3,6 +3,12 @@ import {
   TASK_DAG_MAX_CONCURRENCY,
   TASK_DAG_MIN_CONCURRENCY,
 } from "../contracts.js";
+import {
+  buildDefaultAttributeProfileMap,
+  resolveTaskLeadProfileDispatch,
+  type ProviderModelLike,
+  type TaskLeadProfileSelection,
+} from "./task-lead-profiles.js";
 
 export interface PlanSubtask {
   id: string;
@@ -21,14 +27,16 @@ export interface PlanFilePayload {
 export interface TaskDispatchConfig {
   concurrency: number;
   defaultProfile: string;
+  attributeProfileMap: Record<string, string>;
+  /** @deprecated Use attributeProfileMap. Kept for compatibility with existing tests/config. */
   attributeModelMap: Record<string, string>;
   attributePriority: string[];
+  profileModelMap: Record<string, string>;
+  profileFallbackModelMap: Record<string, string[]>;
+  availableModels: ProviderModelLike[];
 }
 
-export interface TaskDispatchSelection {
-  profile: string;
-  matchedAttribute?: string;
-}
+export type TaskDispatchSelection = TaskLeadProfileSelection;
 
 export interface PlanValidationResult {
   valid: boolean;
@@ -49,14 +57,28 @@ export interface TaskDAG {
 
 export const DEFAULT_TASK_DISPATCH_CONFIG: TaskDispatchConfig = {
   concurrency: TASK_DAG_DEFAULT_CONCURRENCY,
-  defaultProfile: "default",
+  defaultProfile: "code",
+  attributeProfileMap: buildDefaultAttributeProfileMap(),
   attributeModelMap: {
-    code: "code",
-    docs: "research",
-    multimodal: "multimodal",
-    research: "research",
+    ...buildDefaultAttributeProfileMap(),
   },
-  attributePriority: ["multimodal", "code", "research", "docs"],
+  attributePriority: [
+    "risk-high",
+    "security",
+    "migration",
+    "multimodal",
+    "visual",
+    "deep",
+    "large-context",
+    "code",
+    "research",
+    "writing",
+    "docs",
+    "quick",
+  ],
+  profileModelMap: {},
+  profileFallbackModelMap: {},
+  availableModels: [],
 };
 
 export function normalizeTaskDispatchConfig(
@@ -74,16 +96,21 @@ export function normalizeTaskDispatchConfig(
     );
   }
 
-  const attributeModelMap = {
-    ...DEFAULT_TASK_DISPATCH_CONFIG.attributeModelMap,
+  const attributeProfileMap = {
+    ...DEFAULT_TASK_DISPATCH_CONFIG.attributeProfileMap,
     ...(input.attributeModelMap ?? {}),
+    ...(input.attributeProfileMap ?? {}),
   };
 
   return {
     concurrency,
     defaultProfile: input.defaultProfile ?? DEFAULT_TASK_DISPATCH_CONFIG.defaultProfile,
-    attributeModelMap,
+    attributeProfileMap,
+    attributeModelMap: attributeProfileMap,
     attributePriority: input.attributePriority ?? DEFAULT_TASK_DISPATCH_CONFIG.attributePriority,
+    profileModelMap: input.profileModelMap ?? DEFAULT_TASK_DISPATCH_CONFIG.profileModelMap,
+    profileFallbackModelMap: input.profileFallbackModelMap ?? DEFAULT_TASK_DISPATCH_CONFIG.profileFallbackModelMap,
+    availableModels: input.availableModels ?? DEFAULT_TASK_DISPATCH_CONFIG.availableModels,
   };
 }
 
@@ -172,20 +199,15 @@ export function resolveDispatchProfile(
   input: Partial<TaskDispatchConfig> = {},
 ): TaskDispatchSelection {
   const config = normalizeTaskDispatchConfig(input);
-  const attributeSet = new Set(attributes);
 
-  for (const attribute of config.attributePriority) {
-    const profile = config.attributeModelMap[attribute];
-
-    if (attributeSet.has(attribute) && profile) {
-      return {
-        profile,
-        matchedAttribute: attribute,
-      };
-    }
-  }
-
-  return { profile: config.defaultProfile };
+  return resolveTaskLeadProfileDispatch(attributes, {
+    defaultProfile: config.defaultProfile,
+    attributeProfileMap: config.attributeProfileMap,
+    attributePriority: config.attributePriority,
+    profileModelMap: config.profileModelMap,
+    profileFallbackModelMap: config.profileFallbackModelMap,
+    availableModels: config.availableModels,
+  });
 }
 
 export function inferExecutionWaves(subtasks: readonly PlanSubtask[]): string[][] {

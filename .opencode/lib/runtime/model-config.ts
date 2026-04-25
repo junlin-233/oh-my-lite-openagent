@@ -7,6 +7,13 @@ import {
   type RoleCapability,
   formatAutoModelReport,
 } from "./role-model-recommendations.js";
+import {
+  DEFAULT_TASK_LEAD_PROFILES,
+  formatTaskLeadProfileModelReport,
+  isKnownTaskLeadProfile,
+  resolveAutoTaskLeadProfileModels,
+  type AutoTaskLeadProfileModelResult,
+} from "./task-lead-profiles.js";
 
 export {
   resolveAutoModels,
@@ -15,6 +22,10 @@ export {
   type RoleCapability,
   type AutoModelResult,
   formatAutoModelReport,
+  DEFAULT_TASK_LEAD_PROFILES,
+  formatTaskLeadProfileModelReport,
+  resolveAutoTaskLeadProfileModels,
+  type AutoTaskLeadProfileModelResult,
 };
 
 export const CONFIGURABLE_ROLE_NAMES = ROLE_CONTRACTS.map((role) => role.name);
@@ -27,6 +38,15 @@ export interface RoleModelSummary {
   configuredModel?: string;
   effectiveModel?: string;
   inheritsGlobal: boolean;
+}
+
+export interface TaskLeadProfileModelSummary {
+  profile: string;
+  configuredModel?: string;
+  fallbackModels: string[];
+  effectiveModel?: string;
+  inheritsTaskLeadModel: boolean;
+  fallbackPatterns: string[];
 }
 
 export interface ProviderModel {
@@ -85,6 +105,22 @@ export interface ApplyModelConfigResult {
   }>;
   warnings: Array<{
     role: RoleName;
+    warning: string;
+  }>;
+}
+
+export interface ApplyTaskLeadProfileModelConfigResult {
+  changed: Array<{
+    profile: string;
+    previous?: string;
+    next: string;
+  }>;
+  skipped: Array<{
+    profile: string;
+    reason: string;
+  }>;
+  warnings: Array<{
+    profile: string;
     warning: string;
   }>;
 }
@@ -165,6 +201,32 @@ export function listProviderModels(config: Record<string, unknown>): ProviderMod
           origin: "configured-model",
         });
         seenIds.add(agentModel);
+      }
+    }
+  }
+
+  const taskLeadProfiles = isRecord(config["taskLeadProfiles"]) ? config["taskLeadProfiles"] : {};
+  for (const profileValue of Object.values(taskLeadProfiles)) {
+    if (!isRecord(profileValue)) continue;
+    const profileModels = [
+      typeof profileValue["model"] === "string" ? profileValue["model"] : undefined,
+      ...readStringArray(profileValue["fallbackModels"]),
+    ];
+
+    for (const profileModel of profileModels) {
+      if (profileModel && profileModel.includes("/")) {
+        const parts = profileModel.split("/");
+        if (parts.length === 2 && !seenIds.has(profileModel)) {
+          models.push({
+            provider: parts[0]!,
+            model: parts[1]!,
+            id: profileModel,
+            source: classifyModelProvider(parts[0]!),
+            family: classifyModelFamily(profileModel),
+            origin: "configured-model",
+          });
+          seenIds.add(profileModel);
+        }
       }
     }
   }
@@ -311,6 +373,31 @@ export function summarizeRoleModels(config: Record<string, unknown>): RoleModelS
   });
 }
 
+export function summarizeTaskLeadProfileModels(config: Record<string, unknown>): TaskLeadProfileModelSummary[] {
+  const agents = isRecord(config["agent"]) ? config["agent"] : {};
+  const taskLead = isRecord(agents["task-lead"]) ? agents["task-lead"] : {};
+  const globalModel = typeof config["model"] === "string" ? config["model"] : undefined;
+  const taskLeadModel = typeof taskLead["model"] === "string" ? taskLead["model"] : globalModel;
+  const profileConfig = isRecord(config["taskLeadProfiles"]) ? config["taskLeadProfiles"] : {};
+
+  return DEFAULT_TASK_LEAD_PROFILES.map((profile) => {
+    const rawConfigured = profileConfig[profile.name];
+    const configured: Record<string, unknown> = isRecord(rawConfigured) ? rawConfigured : {};
+    const configuredModel = typeof configured["model"] === "string" ? configured["model"] : undefined;
+    const fallbackModels = readStringArray(configured["fallbackModels"]);
+    const effectiveModel = configuredModel ?? taskLeadModel;
+
+    return {
+      profile: profile.name,
+      fallbackModels,
+      fallbackPatterns: profile.fallbackPatterns.map((entry) => entry.pattern),
+      ...(configuredModel ? { configuredModel } : {}),
+      ...(effectiveModel ? { effectiveModel } : {}),
+      inheritsTaskLeadModel: !configuredModel,
+    };
+  });
+}
+
 export function applyRoleModelConfig(
   config: Record<string, unknown>,
   assignments: Record<string, unknown>,
@@ -373,12 +460,77 @@ export function applyRoleModelConfig(
   return { changed, skipped, warnings };
 }
 
+export function applyTaskLeadProfileModelConfig(
+  config: Record<string, unknown>,
+  assignments: Record<string, unknown>,
+  availableModelIds: readonly string[] = [],
+  options: { allowUnavailableModels?: boolean } = {},
+): ApplyTaskLeadProfileModelConfigResult {
+  const profiles = ensureRecord(config, "taskLeadProfiles");
+  const availableModels = new Set(availableModelIds);
+  const changed: ApplyTaskLeadProfileModelConfigResult["changed"] = [];
+  const skipped: ApplyTaskLeadProfileModelConfigResult["skipped"] = [];
+  const warnings: ApplyTaskLeadProfileModelConfigResult["warnings"] = [];
+
+  for (const [profileName, modelValue] of Object.entries(assignments)) {
+    if (!isKnownTaskLeadProfile(profileName)) {
+      skipped.push({ profile: profileName, reason: "unknown task lead profile" });
+      continue;
+    }
+
+    if (typeof modelValue !== "string" || modelValue.trim() === "") {
+      skipped.push({ profile: profileName, reason: "model must be a non-empty string" });
+      continue;
+    }
+
+    const model = modelValue.trim();
+
+    if (!model.includes("/")) {
+      skipped.push({ profile: profileName, reason: "model must use provider/model format" });
+      continue;
+    }
+
+    if (availableModels.size === 0 && !options.allowUnavailableModels) {
+      skipped.push({ profile: profileName, reason: "no imported model pool is available" });
+      continue;
+    }
+
+    if (availableModels.size > 0 && !availableModels.has(model)) {
+      if (!options.allowUnavailableModels) {
+        skipped.push({ profile: profileName, reason: "model is not in the imported model pool" });
+        continue;
+      }
+
+      warnings.push({
+        profile: profileName,
+        warning: "model was not found in the provider list; writing it anyway",
+      });
+    }
+
+    const profile = ensureRecord(profiles, profileName);
+    const previous = typeof profile["model"] === "string" ? profile["model"] : undefined;
+
+    profile["model"] = model;
+    changed.push({
+      profile: profileName,
+      ...(previous ? { previous } : {}),
+      next: model,
+    });
+  }
+
+  return { changed, skipped, warnings };
+}
+
 export function formatModelConfigReport(input: {
   roles: RoleModelSummary[];
   models: ProviderModel[];
+  taskLeadProfiles?: TaskLeadProfileModelSummary[];
   changed?: ApplyModelConfigResult["changed"];
   skipped?: ApplyModelConfigResult["skipped"];
   warnings?: ApplyModelConfigResult["warnings"];
+  profileChanged?: ApplyTaskLeadProfileModelConfigResult["changed"];
+  profileSkipped?: ApplyTaskLeadProfileModelConfigResult["skipped"];
+  profileWarnings?: ApplyTaskLeadProfileModelConfigResult["warnings"];
 }): string {
   const lines = [
     "Oh My Lite OpenAgent role model configuration",
@@ -402,6 +554,17 @@ export function formatModelConfigReport(input: {
     ),
   ];
 
+  if (input.taskLeadProfiles) {
+    lines.push("", "Task Lead profile models:");
+    lines.push(...input.taskLeadProfiles.map((profile) => {
+      const source = profile.inheritsTaskLeadModel ? "inherits task-lead" : "configured";
+      const fallback = profile.fallbackModels.length > 0
+        ? ` fallback=${profile.fallbackModels.join(",")}`
+        : "";
+      return `- ${profile.profile}: ${profile.effectiveModel ?? "<unset>"} (${source})${fallback}`;
+    }));
+  }
+
   if (input.changed) {
     lines.push("", "Changes applied:");
     lines.push(
@@ -423,6 +586,29 @@ export function formatModelConfigReport(input: {
   if (input.warnings && input.warnings.length > 0) {
     lines.push("", "Warnings:");
     lines.push(...input.warnings.map((item) => `- ${item.role}: ${item.warning}`));
+  }
+
+  if (input.profileChanged) {
+    lines.push("", "Task Lead profile changes applied:");
+    lines.push(
+      ...(
+        input.profileChanged.length > 0
+          ? input.profileChanged.map((change) => (
+            `- ${change.profile}: ${change.previous ?? "<inherited>"} -> ${change.next}`
+          ))
+          : ["- <none>"]
+      ),
+    );
+  }
+
+  if (input.profileSkipped && input.profileSkipped.length > 0) {
+    lines.push("", "Task Lead profile skipped:");
+    lines.push(...input.profileSkipped.map((item) => `- ${item.profile}: ${item.reason}`));
+  }
+
+  if (input.profileWarnings && input.profileWarnings.length > 0) {
+    lines.push("", "Task Lead profile warnings:");
+    lines.push(...input.profileWarnings.map((item) => `- ${item.profile}: ${item.warning}`));
   }
 
   return lines.join("\n");
@@ -549,6 +735,12 @@ function unwrapResponseData(response: unknown): unknown {
   if (!isRecord(response)) return response;
 
   return response["data"] ?? response["response"] ?? response;
+}
+
+function readStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.trim() !== "")
+    : [];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

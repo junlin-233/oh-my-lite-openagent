@@ -45,7 +45,7 @@ After installing, you MUST configure models for each role. Ask the user:
 - Kimi For Coding (kimi-for-coding)
 - Vercel AI Gateway
 
-Once the user answers, call `bounded_lite_model_config` with `action=import` inside the OpenCode session. This imports every provider OpenCode can discover, including subscription providers such as `opencode` and `opencode-go`, without writing config. Then call `action=auto` to generate recommendations for each role based on role capability needs:
+Once the user answers, call `bounded_lite_model_config` with `action=import` inside the OpenCode session. This imports every provider OpenCode can discover, including subscription providers such as `opencode` and `opencode-go`, without writing config. Then call `action=auto` to generate recommendations for each role and Task Lead profile based on capability needs:
 
 | Role              | Capability        | Best models in priority order                                                                       |
 |-------------------|-------------------|------------------------------------------------------------------------------------------------------|
@@ -68,8 +68,14 @@ bounded_lite_model_config({ action: "auto" })
 `action=auto` is preview-only and must not write config. Show the recommendations to the user, ask whether they want to adjust any role, then apply with `action=apply` using only model IDs returned by `action=import`:
 
 ```
-bounded_lite_model_config({ action: "apply", assignments: { "command-lead": "openai/gpt-5.4", "explore": "openai/gpt-5.4-mini" } })
+bounded_lite_model_config({
+  action: "apply",
+  assignments: { "command-lead": "openai/gpt-5.4", "explore": "openai/gpt-5.4-mini" },
+  taskLeadProfileAssignments: { "code": "opencode/claude-sonnet-4-6", "quick": "opencode-go/minimax-m2.7-highspeed" }
+})
 ```
+
+Task Lead profiles (`quick`, `code`, `research`, `writing`, `visual`, `deep`, `risk-high`) do not create new agents; they configure dispatch metadata for the single hidden `task-lead` agent.
 
 ## Step 3: Verify
 
@@ -152,9 +158,9 @@ If model auto-configuration did not cover all roles, use `/agent-models` in Open
 Inside OpenCode, type `/agent-models`. The command-lead agent will call `bounded_lite_model_config` with one of four actions:
 
 - **`action=import`**: Read all discovered provider models without writing config.
-- **`action=auto`**: Generate recommended role assignments only (no config write).
-- **`action=list`**: Show every role's current model and all discovered models.
-- **`action=apply`**: Manually assign specific imported models. Example: `{ action: "apply", assignments: { "command-lead": "openai/gpt-5.4", "explore": "openai/gpt-5.4-mini" } }`
+- **`action=auto`**: Generate recommended role assignments and Task Lead profile assignments only (no config write).
+- **`action=list`**: Show every role's current model, Task Lead profile model, and all discovered models.
+- **`action=apply`**: Manually assign specific imported models. Example: `{ action: "apply", assignments: { "command-lead": "openai/gpt-5.4" }, taskLeadProfileAssignments: { "code": "opencode/claude-sonnet-4-6" } }`
 
 ## Success Condition
 

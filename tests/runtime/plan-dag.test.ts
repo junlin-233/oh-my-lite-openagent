@@ -48,7 +48,7 @@ describe("plan DAG runtime contract", () => {
   it("uses configurable attribute dispatch instead of hard-coded model names", () => {
     const dag = buildTaskDAG(validPlan, {
       concurrency: 5,
-      attributeModelMap: {
+      attributeProfileMap: {
         code: "fast-code-profile",
         multimodal: "vision-profile",
       },
@@ -121,6 +121,26 @@ describe("plan DAG runtime contract", () => {
   it("falls back to the default dispatch profile when no configured attribute matches", () => {
     expect(resolveDispatchProfile(["unknown"], { defaultProfile: "general" })).toEqual({
       profile: "general",
+    });
+  });
+
+  it("can include Task Lead profile model metadata when provider models are supplied", () => {
+    const dag = buildTaskDAG(validPlan, {
+      availableModels: [
+        { id: "opencode/claude-sonnet-4-6" },
+        { id: "google/gemini-3.1-pro" },
+      ],
+    });
+
+    expect(dag.nodes.find((node) => node.id === "implement")?.dispatch).toMatchObject({
+      profile: "code",
+      matchedAttribute: "code",
+      recommendedModel: "opencode/claude-sonnet-4-6",
+    });
+    expect(dag.nodes.find((node) => node.id === "visual-check")?.dispatch).toMatchObject({
+      profile: "visual",
+      matchedAttribute: "multimodal",
+      recommendedModel: "google/gemini-3.1-pro",
     });
   });
 });

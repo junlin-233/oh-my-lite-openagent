@@ -32,23 +32,30 @@ describe("plugin safety", () => {
     expect(toolNames).not.toHaveLength(0);
     expect(toolNames).toContain("bounded_lite_plan_dag");
     expect(toolNames).toContain("bounded_lite_plan_readiness");
+    expect(toolNames).toContain("bounded_lite_plan_artifact");
     expect(toolNames.every((toolName) => toolName.startsWith("bounded_lite_"))).toBe(true);
     expect(toolNames.every((toolName) => /^[a-zA-Z0-9_-]+$/.test(toolName))).toBe(true);
   });
 
-  it("keeps model config writes behind an explicit permission ask", async () => {
+  it("keeps config and artifact writes behind an explicit permission ask", async () => {
     const hooks = await Promise.resolve(
       createBoundedLitePlugin({
         directory: process.cwd(),
       }),
     );
-    const output: { status: "allow" | "ask" | "deny" } = { status: "deny" };
+    const modelOutput: { status: "allow" | "ask" | "deny" } = { status: "deny" };
+    const planOutput: { status: "allow" | "ask" | "deny" } = { status: "deny" };
 
     await hooks["permission.ask"]?.(
       { tool: "bounded_lite_model_config", action: "execute" },
-      output,
+      modelOutput,
+    );
+    await hooks["permission.ask"]?.(
+      { tool: "bounded_lite_plan_artifact", action: "execute" },
+      planOutput,
     );
 
-    expect(output.status).toBe("ask");
+    expect(modelOutput.status).toBe("ask");
+    expect(planOutput.status).toBe("ask");
   });
 });

@@ -20,7 +20,8 @@ describe("OpenCode agent topology", () => {
     expect(config.command?.["agent-models"]).toMatchObject({
       agent: "command-lead",
     });
-    expect(config.command?.["agent-models"]?.description).toContain("per-agent assignments");
+    expect(config.command?.["agent-models"]?.description).toContain("per-role");
+    expect(config.command?.["agent-models"]?.description).toContain("Task Lead profile assignments");
     expect(config.command?.["agent-models"]?.template).toContain("bounded_lite_model_config");
     expect(config.command?.["agent-models"]?.template).toContain('action: "import"');
     expect(config.command?.["agent-models"]?.template).toContain(
@@ -28,6 +29,9 @@ describe("OpenCode agent topology", () => {
     );
     expect(config.command?.["agent-models"]?.template).toContain("opencode-go");
     expect(config.command?.["agent-models"]?.template).toContain("action=auto is recommendation-only");
+    expect(config.command?.["agent-models"]?.template).toContain("Task Lead profile recommendations");
+    expect(config.command?.["agent-models"]?.template).toContain("taskLeadProfileAssignments");
+    expect(config.command?.["agent-models"]?.template).toContain("Do not create new Task Lead agents");
     expect(config.command?.["agent-models"]?.template).toContain("ask whether they want changes");
   });
 
@@ -173,6 +177,16 @@ describe("OpenCode agent topology", () => {
     expect(promptText).toContain("escalate with the blockers");
   });
 
+  it("requires Command Lead to persist plan artifacts under .liteagent", () => {
+    const promptText = readPrompt("command-lead");
+
+    expect(promptText).toContain("## Plan Artifact Persistence");
+    expect(promptText).toContain(".liteagent/plans/");
+    expect(promptText).toContain(".liteagent/plan-index.jsonl");
+    expect(promptText).toContain("bounded_lite_plan_artifact");
+    expect(promptText).toContain("Do not write plan artifacts under `.opencode/`");
+  });
+
   it("keeps Plan Builder aligned with the v2.1 plan spec", () => {
     const promptText = readPrompt("plan-builder");
 
@@ -192,6 +206,16 @@ describe("OpenCode agent topology", () => {
     expect(promptText).toContain("current-state conflicts");
     expect(promptText).toContain("target-state gaps");
     expect(promptText).toContain("never `reviewed` or `M3`");
+    expect(promptText).toContain("recommended_plan_path");
+    expect(promptText).toContain(".liteagent/plans/");
+  });
+
+  it("requires Deep Plan Builder to return a .liteagent plan path without owning persistence", () => {
+    const promptText = readPrompt("deep-plan-builder");
+
+    expect(promptText).toContain("recommended_plan_path");
+    expect(promptText).toContain(".liteagent/plans/");
+    expect(promptText).toContain("Command Lead owns actual file persistence");
   });
 
   it("requires every delegating role to use the standard assignment fields", () => {

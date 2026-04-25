@@ -16,10 +16,12 @@
 - `plan-builder`：可见规划模式，用于需求澄清和计划骨架。
 - `deep-plan-builder`：可见深度规划模式，并强制进入计划审查。
 - `task-lead`、`explore`、`librarian`、`plan-review`、`result-review`：隐藏的受限 subagent。
+- Task Lead profiles（`quick`、`code`、`research`、`writing`、`visual`、`deep`、`risk-high`）会把计划属性映射为派发元数据和模型推荐，但不会新增真实 agent。
 - 每个角色都参照 OpenCode 的任务追踪风格维护自己的本地 todo 列表，但 todo 不替代 artifact 或 canonical state。
 - `result-review` 是用户可选择调用的可选审查，只审查 Command Lead 的执行摘要/最终整合结果，不审查 Task Lead 子任务返回。
 - 有委派权的角色派遣任务时使用显式模板：`TASK`、`EXPECTED OUTCOME`、`ROLE`、`SCOPE`、`UPSTREAM EVIDENCE`、`REQUIRED TOOLS`、`MUST DO`、`MUST NOT DO`、`CONTEXT`、`DELIVERABLE FORMAT`、`FAILURE RETURN`。
-- 兼容 provider 的插件工具：`bounded_lite_route`、`bounded_lite_plan_dag`、`bounded_lite_plan_readiness`、`bounded_lite_background`、`bounded_lite_runtime_profile`、`bounded_lite_model_config`。
+- 持久化计划 artifact 会写入 `.liteagent/plans/`，并追加索引 `.liteagent/plan-index.jsonl`。
+- 兼容 provider 的插件工具：`bounded_lite_route`、`bounded_lite_plan_dag`、`bounded_lite_plan_readiness`、`bounded_lite_plan_artifact`、`bounded_lite_background`、`bounded_lite_runtime_profile`、`bounded_lite_model_config`。
 - OpenCode 原生 `build` 和 `plan` 模式会被隐藏并禁用。
 - 全局安装器会保留你已有的 model、provider、API key、插件和自定义 agent。
 
@@ -104,7 +106,7 @@ npm run install:opencode -- --config-dir /path/to/opencode-config
 node scripts/install.mjs --dry-run
 ```
 
-## 角色模型配置
+## 角色与 Task Lead Profile 模型配置
 
 在 OpenCode TUI 里运行：
 
@@ -112,7 +114,7 @@ node scripts/install.mjs --dry-run
 /agent-models
 ```
 
-这个命令会先导入 OpenCode 能发现的全部可用模型池，再让 AI 在这个模型池内按角色能力给出推荐。默认会包含 `openai`、`opencode`、`opencode-go` 等已连接 provider；当前全局 `model` 只作为上下文，不作为硬过滤条件。Codex 后端模型默认排除。
+这个命令会先导入 OpenCode 能发现的全部可用模型池，再让 AI 在这个模型池内按角色能力和 Task Lead profile 能力给出推荐。默认会包含 `openai`、`opencode`、`opencode-go` 等已连接 provider；当前全局 `model` 只作为上下文，不作为硬过滤条件。Codex 后端模型默认排除。
 
 推荐流程：
 
@@ -121,7 +123,32 @@ bounded_lite_model_config({ action: "import" })
 bounded_lite_model_config({ action: "auto" })
 ```
 
-`action: "auto"` 只返回推荐，不会写配置。需要先把推荐结果展示给用户，询问是否修改，然后再执行 `action: "apply"`。
+`action: "auto"` 只返回推荐，不会写配置。它会同时返回角色推荐和 `Recommended Task Lead profile assignments JSON`。需要先把推荐结果展示给用户，询问是否修改，然后再执行 `action: "apply"`。
+
+角色推荐：
+
+| Role | 能力需求 | 推荐方向 |
+| --- | --- | --- |
+| `command-lead` | 最强推理 | 最强的编排/推理模型 |
+| `plan-builder` | 强规划 | 擅长结构化计划的强模型 |
+| `deep-plan-builder` | 详细交接计划 | 适合低强度执行模型交接的强规划模型 |
+| `task-lead` | 受限执行 | 作为默认/兜底执行器的中高档实现模型 |
+| `explore` | 快速检索 | 快速、便宜的 mini/flash/highspeed 模型 |
+| `librarian` | 快速研究 | 快速、便宜的文档/研究模型 |
+| `plan-review` | 关键审查 | 强推理审查模型 |
+| `result-review` | 结果核验 | 强推理核验模型 |
+
+Task Lead profiles 由 `plan.subtasks[].attributes` 选择。它们**不会**新增真实 agent，只为单一隐藏 `task-lead` 配置派发元数据。当前 profile 模型作为推荐/兜底元数据使用，除非运行时支持 per-task model override。
+
+| Profile | 匹配 attributes | 推荐方向 |
+| --- | --- | --- |
+| `quick` | `quick` | 最快、低成本模型 |
+| `code` | `code` | 强代码实现模型 |
+| `research` | `research`, `docs` | 快速研究/文档检索模型 |
+| `writing` | `writing` | 文档和说明文字模型 |
+| `visual` | `multimodal`, `visual` | 视觉能力或强 UI 推理模型 |
+| `deep` | `deep`, `large-context` | 更强长上下文推理模型 |
+| `risk-high` | `risk-high`, `security`, `migration` | 高风险变更用强审慎推理模型 |
 
 手动微调时只能写入导入池里存在的模型，例如：
 
@@ -130,6 +157,31 @@ bounded_lite_model_config({ action: "apply", assignments: { "command-lead": "ope
 ```
 
 命令会把 `agent.<role>.model` 写入 OpenCode 配置，同时保留无关的 provider、model、插件和自定义 agent 设置。默认会拒绝导入池外的模型，避免 AI 编造 provider/model。
+
+同一个命令也可以预览和写入 Task Lead profile 模型，而不新增真实 agent。profile 由 `plan.subtasks[].attributes` 选择；当前它们作为派发元数据使用，除非运行时支持 per-task model override：
+
+```text
+bounded_lite_model_config({ action: "apply", taskLeadProfileAssignments: { "code": "opencode/claude-sonnet-4-6", "quick": "opencode-go/minimax-m2.7-highspeed" } })
+```
+
+内置 profile 包括 `quick`、`code`、`research`、`writing`、`visual`、`deep`、`risk-high`。
+
+也可以同时写入角色模型和 profile 模型：
+
+```text
+bounded_lite_model_config({
+  action: "apply",
+  assignments: {
+    "command-lead": "openai/gpt-5.4",
+    "task-lead": "opencode/kimi-k2.5"
+  },
+  taskLeadProfileAssignments: {
+    "code": "opencode/claude-sonnet-4-6",
+    "quick": "opencode-go/minimax-m2.7-highspeed",
+    "visual": "google/gemini-3.1-pro"
+  }
+})
+```
 
 ## Agent 列表
 

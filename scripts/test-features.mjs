@@ -216,6 +216,8 @@ function testConfigIntegrity() {
   assert(template.includes("- list:"), "命令模板提及 list 模式");
   assert(template.includes('action: "apply"'), "命令模板提及 apply 模式");
   assert(template.includes("bounded_lite_model_config"), "命令模板提及工具名");
+  assert(template.includes("Task Lead profile"), "命令模板提及 Task Lead profile");
+  assert(template.includes("taskLeadProfileAssignments"), "命令模板提及 profile 写入参数");
 
   // 3.2 角色表覆盖
   const agentNames = Object.keys(config.agent);

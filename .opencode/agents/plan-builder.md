@@ -31,6 +31,7 @@ You are the visible strong-model planner.
 ## Spec v2.1 Compliance
 
 - Produce a plan that is true, locatable, verifiable, and handoff-ready. Completeness must not outrun evidence.
+- Return the plan as a chat artifact plus a `recommended_plan_path` under `.liteagent/plans/`; do not write the file yourself.
 - Every key assertion in `goals`, `non_goals`, `scope_boundaries`, `acceptance_criteria`, `assumptions`, `open_questions`, `decision_log`, `repository_context`, and each phase `Goal` and `Acceptance` must carry exactly one tag: `[User Confirmed]`, `[Repo Observed]`, `[Inferred]`, or `[Open Question]`.
 - Every `[Inferred]` assertion must include `basis` and `failure_if_false`.
 - Every `[Open Question]` must state the question and why it remains open.
@@ -51,6 +52,7 @@ status: draft|reviewed|blocked
 repo_snapshot_ref: <snapshot_id_or_none>
 generated_by: plan_builder
 updated_at: <iso8601>
+recommended_plan_path: .liteagent/plans/<yyyy-mm-dd>-<short-slug>.md
 ```
 
 Required sections:
@@ -82,4 +84,4 @@ plan:
       description: <bounded task>
 ```
 
-`depends_on` is required even when empty. `attributes` is a tag set used for configured dispatch by Command Lead.
+`depends_on` is required even when empty. `attributes` is a tag set used for configured Task Lead profile dispatch by Command Lead; use capability tags like `quick`, `code`, `research`, `docs`, `writing`, `multimodal`, `visual`, `deep`, `large-context`, `risk-high`, `security`, or `migration` rather than model names.

@@ -7,12 +7,15 @@ import {
 import { resolveCategoryRoute } from "../lib/runtime/categories.js";
 import { buildTaskDAG, type TaskDispatchConfig } from "../lib/runtime/plan-dag.js";
 import { validatePlanReadiness } from "../lib/runtime/plan-readiness.js";
+import { writePlanArtifact } from "../lib/runtime/plan-artifact.js";
 import { createRuntimeProfile } from "../lib/runtime/safety.js";
 import {
   applyRoleModelConfig,
+  applyTaskLeadProfileModelConfig,
   formatAutoModelReport,
   formatModelImportReport,
   formatModelConfigReport,
+  formatTaskLeadProfileModelReport,
   importModelPool,
   inferModelPoolPolicy,
   listKnownModelsForCredentialProviders,
@@ -23,7 +26,9 @@ import {
   type ModelPoolPolicy,
   type ModelProviderSource,
   resolveAutoModels,
+  resolveAutoTaskLeadProfileModels,
   summarizeRoleModels,
+  summarizeTaskLeadProfileModels,
 } from "../lib/runtime/model-config.js";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -99,6 +104,14 @@ function defaultDataDir(): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function resolveProjectRoot(input: PluginInput): string {
+  return path.resolve(input.project?.root ?? input.worktree ?? input.directory ?? process.cwd());
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 
 async function readOpenCodeConfig(configDir?: string): Promise<Record<string, unknown>> {
@@ -249,6 +262,48 @@ export function createBoundedLitePlugin(
           return validatePlanReadiness(payload, dispatch as Partial<TaskDispatchConfig>);
         },
       },
+      bounded_lite_plan_artifact: {
+        description: "Persist a Command Lead-approved plan artifact under .liteagent/plans and append .liteagent/plan-index.jsonl.",
+        async execute(args, context) {
+          const action = readString(args["action"]) ?? "write";
+          if (action !== "write") {
+            throw new Error("bounded_lite_plan_artifact action must be write.");
+          }
+
+          const title = readString(args["title"]);
+          const markdown = readString(args["markdown"]) ?? readString(args["content"]);
+          if (!title || !markdown) {
+            throw new Error("bounded_lite_plan_artifact write requires title and markdown.");
+          }
+
+          const planId = readString(args["planId"]) ?? readString(args["plan_id"]);
+          const maturityLevel = readString(args["maturityLevel"]) ?? readString(args["maturity_level"]);
+          const generatedBy = readString(args["generatedBy"]) ?? readString(args["generated_by"]);
+          const requestedPath = readString(args["path"]) ?? readString(args["recommended_plan_path"]);
+          const result = await writePlanArtifact({
+            projectRoot: resolveProjectRoot(context),
+            title,
+            markdown,
+            artifactKind: args["artifactKind"] === "detailed-plan" ? "detailed-plan" : "plan-skeleton",
+            status: args["status"] === "reviewed" || args["status"] === "blocked" ? args["status"] : "draft",
+            overwrite: args["overwrite"] === true,
+            ...(planId ? { planId } : {}),
+            ...(maturityLevel ? { maturityLevel } : {}),
+            ...(generatedBy ? { generatedBy } : {}),
+            ...(requestedPath ? { requestedPath } : {}),
+          });
+
+          return [
+            "Oh My Lite OpenAgent plan artifact persisted",
+            "",
+            `Plan ID: ${result.planId}`,
+            `Path: ${result.relativePath}`,
+            `Index: .liteagent/plan-index.jsonl`,
+            `Bytes: ${result.bytes}`,
+            `Overwritten: ${result.overwritten ? "yes" : "no"}`,
+          ].join("\n");
+        },
+      },
       bounded_lite_background: {
         description: "List currently tracked background tasks from the bounded coordinator.",
         execute() {
@@ -262,13 +317,13 @@ export function createBoundedLitePlugin(
         },
       },
       bounded_lite_model_config: {
-        description: `Import, list, recommend, or update per-role OpenCode models for Oh My Lite OpenAgent.
+        description: `Import, list, recommend, or update per-role and Task Lead profile OpenCode models for Oh My Lite OpenAgent.
 
 Actions:
 	- import: Import all available OpenCode model providers by default. Call with { "action": "import" }.
 - list: Show current role model assignments and available provider models. Call with { "action": "list" }.
-- auto: Recommend role model assignments from the imported model pool based on role capability needs. This does not write config. Call with { "action": "auto" }.
-- apply: Manually assign specific models to roles. Call with { "action": "apply", "assignments": { "role-name": "provider/model-id" } }.
+- auto: Recommend role and Task Lead profile model assignments from the imported model pool based on capability needs. This does not write config. Call with { "action": "auto" }.
+- apply: Manually assign specific models to roles or profiles. Call with { "action": "apply", "assignments": { "role-name": "provider/model-id" }, "taskLeadProfileAssignments": { "code": "provider/model-id" } }.
 
 Policy:
 	- source and providerPreference are optional narrowing filters; by default the imported pool includes every discovered provider.
@@ -284,6 +339,15 @@ Role capability summary:
 - librarian (fast-retrieval): fast, cheap models preferred
 - plan-review (critical-review): needs strongest reasoning to catch errors
 - result-review (critical-review): needs strongest reasoning to verify completeness
+
+Task Lead profile summary:
+- quick: fast low-risk execution
+- code: bounded implementation and tests
+- research/docs: repository or external API understanding
+- writing: docs and prose
+- visual/multimodal: UI or visual verification
+- deep/large-context: difficult or large-context execution
+- risk-high/security/migration: high-risk changes requiring stronger reasoning
 
 AI selection rule:
 - Only choose model IDs returned by action=import or the imported pool used by action=auto.
@@ -359,14 +423,16 @@ If no provider models are found, tell the user to configure or connect OpenCode 
 
             return formatModelConfigReport({
               roles: summarizeRoleModels(config),
+              taskLeadProfiles: summarizeTaskLeadProfileModels(config),
               models,
             });
           }
 
           if (action === "auto") {
             const autoResult = resolveAutoModels(importedPool, config);
+            const profileAutoResult = resolveAutoTaskLeadProfileModels(importedPool);
 
-            if (importedPool.length === 0 && autoResult.resolved.length === 0) {
+            if (importedPool.length === 0 && autoResult.resolved.length === 0 && profileAutoResult.resolved.length === 0) {
               const roleLines = summarizeRoleModels(config).map((role) => {
                 const source = role.inheritsGlobal ? "inherits global" : "configured";
                 return `- ${role.role}: ${role.effectiveModel ?? "<unset>"} (${source})`;
@@ -403,18 +469,25 @@ If no provider models are found, tell the user to configure or connect OpenCode 
             }
 
             const assignments = autoResult.assignments;
+            const taskLeadProfileAssignments = profileAutoResult.assignments;
             const reportLines = [
               inferredPolicy.reason,
               "",
               formatAutoModelReport(autoResult),
               "",
+              formatTaskLeadProfileModelReport(profileAutoResult),
+              "",
               formatModelConfigReport({
                 roles: summarizeRoleModels(config),
+                taskLeadProfiles: summarizeTaskLeadProfileModels(config),
                 models: importedPool,
               }),
               "",
               "Recommended assignments JSON:",
               JSON.stringify(assignments, null, 2),
+              "",
+              "Recommended Task Lead profile assignments JSON:",
+              JSON.stringify(taskLeadProfileAssignments, null, 2),
               "",
               "Preview only. Ask the user whether they want to modify these assignments, then call action=apply to write them.",
             ];
@@ -424,30 +497,48 @@ If no provider models are found, tell the user to configure or connect OpenCode 
 
           if (action === "apply") {
             const assignments = args["assignments"];
+            const taskLeadProfileAssignments = args["taskLeadProfileAssignments"] ?? args["profileAssignments"];
 
-            if (typeof assignments !== "object" || assignments === null || Array.isArray(assignments)) {
+            const hasRoleAssignments = typeof assignments === "object" && assignments !== null && !Array.isArray(assignments);
+            const hasProfileAssignments = typeof taskLeadProfileAssignments === "object" &&
+              taskLeadProfileAssignments !== null &&
+              !Array.isArray(taskLeadProfileAssignments);
+
+            if (!hasRoleAssignments && !hasProfileAssignments) {
               throw new Error(
-                "bounded_lite_model_config apply requires assignments: { role: \"provider/model\" }.",
+                "bounded_lite_model_config apply requires assignments or taskLeadProfileAssignments with provider/model values.",
               );
             }
 
-            const result = applyRoleModelConfig(
+            const result = hasRoleAssignments ? applyRoleModelConfig(
               config,
               assignments as Record<string, unknown>,
               importedPool.map((model) => model.id),
               {
                 allowUnavailableModels: args["allowUnavailableModels"] === true,
               },
-            );
+            ) : { changed: [], skipped: [], warnings: [] };
+            const profileResult = hasProfileAssignments ? applyTaskLeadProfileModelConfig(
+              config,
+              taskLeadProfileAssignments as Record<string, unknown>,
+              importedPool.map((model) => model.id),
+              {
+                allowUnavailableModels: args["allowUnavailableModels"] === true,
+              },
+            ) : { changed: [], skipped: [], warnings: [] };
             const configPath = await writeOpenCodeConfig(config, options.configDir);
 
             return [
               formatModelConfigReport({
                 roles: summarizeRoleModels(config),
+                taskLeadProfiles: summarizeTaskLeadProfileModels(config),
                 models: importedPool,
                 changed: result.changed,
                 skipped: result.skipped,
                 warnings: result.warnings,
+                profileChanged: profileResult.changed,
+                profileSkipped: profileResult.skipped,
+                profileWarnings: profileResult.warnings,
               }),
               "",
               `Updated ${configPath}. Restart OpenCode or start a new session if the active TUI keeps old model state.`,
@@ -459,7 +550,7 @@ If no provider models are found, tell the user to configure or connect OpenCode 
       },
     },
     "permission.ask"(input, output) {
-      if (input.tool === "bounded_lite_model_config") {
+      if (input.tool === "bounded_lite_model_config" || input.tool === "bounded_lite_plan_artifact") {
         output.status = "ask";
         return;
       }

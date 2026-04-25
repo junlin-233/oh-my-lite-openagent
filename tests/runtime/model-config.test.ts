@@ -1,4 +1,5 @@
 import {
+  applyTaskLeadProfileModelConfig,
   applyRoleModelConfig,
   classifyModelFamily,
   classifyModelProvider,
@@ -10,7 +11,9 @@ import {
   listProviderModels,
   mergeProviderModels,
   resolveAutoModels,
+  resolveAutoTaskLeadProfileModels,
   summarizeRoleModels,
+  summarizeTaskLeadProfileModels,
 } from "../../.opencode/lib/runtime/model-config.js";
 
 describe("role model configuration", () => {
@@ -152,6 +155,7 @@ describe("role model configuration", () => {
   it("shows provider source in model configuration reports", () => {
     const report = formatModelConfigReport({
       roles: summarizeRoleModels({ model: "openai/gpt-5.4" }),
+      taskLeadProfiles: summarizeTaskLeadProfileModels({ model: "openai/gpt-5.4" }),
       models: [
         {
           provider: "opencode",
@@ -170,6 +174,7 @@ describe("role model configuration", () => {
 
     expect(report).toContain("opencode/gpt-5.4 [opencode-subscription/gpt");
     expect(report).toContain("openai/gpt-5.4 [api-provider/gpt");
+    expect(report).toContain("Task Lead profile models:");
   });
 
   it("prefers runtime provider models while keeping JSON fallback models", () => {
@@ -288,5 +293,48 @@ describe("role model configuration", () => {
     expect(result.assignments["command-lead"]).toBe("anthropic/claude-opus-4-7");
     expect(result.assignments.explore).toBe("openai/gpt-5.4-mini");
     expect(result.assignments["deep-plan-builder"]).toBe("google/gemini-3-flash");
+  });
+
+  it("summarizes and applies Task Lead profile model assignments", () => {
+    const config: Record<string, unknown> = {
+      agent: {
+        "task-lead": { mode: "subagent", model: "opencode/kimi-k2.5" },
+      },
+    };
+
+    expect(summarizeTaskLeadProfileModels(config).find((profile) => profile.profile === "code")).toMatchObject({
+      effectiveModel: "opencode/kimi-k2.5",
+      inheritsTaskLeadModel: true,
+    });
+
+    const result = applyTaskLeadProfileModelConfig(
+      config,
+      {
+        code: "opencode/claude-sonnet-4-6",
+        unknown: "opencode/claude-sonnet-4-6",
+      },
+      ["opencode/claude-sonnet-4-6"],
+    );
+
+    expect(result.changed).toEqual([
+      { profile: "code", previous: undefined, next: "opencode/claude-sonnet-4-6" },
+    ]);
+    expect(result.skipped).toEqual([
+      { profile: "unknown", reason: "unknown task lead profile" },
+    ]);
+    expect(summarizeTaskLeadProfileModels(config).find((profile) => profile.profile === "code")).toMatchObject({
+      configuredModel: "opencode/claude-sonnet-4-6",
+      inheritsTaskLeadModel: false,
+    });
+  });
+
+  it("resolves automatic Task Lead profile models from available provider models", () => {
+    const result = resolveAutoTaskLeadProfileModels([
+      { id: "openai/gpt-5.4-mini" },
+      { id: "google/gemini-3.1-pro" },
+    ]);
+
+    expect(result.assignments.quick).toBe("openai/gpt-5.4-mini");
+    expect(result.assignments.visual).toBe("google/gemini-3.1-pro");
   });
 });

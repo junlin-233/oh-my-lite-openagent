@@ -16,10 +16,12 @@ This is intentionally lighter than Oh My OpenAgent. No giant runtime, no model l
 - `plan-builder`: visible planning mode for requirements and plan skeletons.
 - `deep-plan-builder`: visible deep planning mode with mandatory plan review.
 - `task-lead`, `explore`, `librarian`, `plan-review`, `result-review`: hidden bounded subagents.
+- Task Lead profiles (`quick`, `code`, `research`, `writing`, `visual`, `deep`, `risk-high`) map plan attributes to dispatch metadata and model recommendations without adding extra agents.
 - Each role maintains its own local todo list for multi-step work, following OpenCode-style task tracking without replacing artifacts or canonical state.
 - `result-review` is optional and user-selectable. It reviews Command Lead execution summaries/final integrated results, not Task Lead child task returns.
 - Delegating roles use an explicit assignment template: `TASK`, `EXPECTED OUTCOME`, `ROLE`, `SCOPE`, `UPSTREAM EVIDENCE`, `REQUIRED TOOLS`, `MUST DO`, `MUST NOT DO`, `CONTEXT`, `DELIVERABLE FORMAT`, and `FAILURE RETURN`.
-- Provider-safe plugin tools: `bounded_lite_route`, `bounded_lite_plan_dag`, `bounded_lite_plan_readiness`, `bounded_lite_background`, `bounded_lite_runtime_profile`, `bounded_lite_model_config`.
+- Durable plan artifacts are written under `.liteagent/plans/` with an append-only `.liteagent/plan-index.jsonl`.
+- Provider-safe plugin tools: `bounded_lite_route`, `bounded_lite_plan_dag`, `bounded_lite_plan_readiness`, `bounded_lite_plan_artifact`, `bounded_lite_background`, `bounded_lite_runtime_profile`, `bounded_lite_model_config`.
 - OpenCode native `build` and `plan` modes hidden behind disabled overrides.
 - A global installer that preserves your existing model, provider, API key, plugins, and custom agents.
 
@@ -74,7 +76,7 @@ Follow the AI installation guide exactly.
 The AI agent will:
 1. Clone the repo and run `npm install` + `npm run install:opencode`
 2. Ask which AI providers you have access to
-3. Call `bounded_lite_model_config({ action: "import" })`, then `action: "auto"` to generate role recommendations from all discovered providers
+3. Call `bounded_lite_model_config({ action: "import" })`, then `action: "auto"` to generate role and Task Lead profile recommendations from all discovered providers
 4. Verify the installation worked
 
 AI installation instructions live in [`AI-INSTALL.md`](./AI-INSTALL.md).
@@ -110,7 +112,7 @@ Dry run:
 node scripts/install.mjs --dry-run
 ```
 
-## Role Model Configuration
+## Role and Task Lead Profile Model Configuration
 
 Each role needs a model that fits its capability. Run this inside the OpenCode TUI:
 
@@ -118,7 +120,7 @@ Each role needs a model that fits its capability. Run this inside the OpenCode T
 /agent-models
 ```
 
-The command uses the `bounded_lite_model_config` tool. The default workflow is import first, preview recommendations, ask for user changes, then apply.
+The command uses the `bounded_lite_model_config` tool. The default workflow is import first, preview role and Task Lead profile recommendations, ask for user changes, then apply.
 
 ### import — Load all discovered provider models
 
@@ -128,13 +130,13 @@ bounded_lite_model_config({ action: "import" })
 
 By default this imports every model provider OpenCode can discover, including subscription providers such as `opencode` and `opencode-go`. The current global `model` is context only; it is not a hard import filter. Codex backend models are excluded unless explicitly allowed.
 
-### auto — Recommend the best imported model for each role
+### auto — Recommend the best imported model for each role and profile
 
 ```
 bounded_lite_model_config({ action: "auto" })
 ```
 
-Returns recommended assignments only. It does not write config:
+Returns recommended assignments only. It does not write config. The report includes role assignments and `Recommended Task Lead profile assignments JSON`.
 
 | Role              | Needs                  | Best models first                          |
 |-------------------|------------------------|--------------------------------------------|
@@ -147,19 +149,56 @@ Returns recommended assignments only. It does not write config:
 | plan-review       | Strongest reasoning    | strongest imported review model |
 | result-review     | Strongest reasoning    | strongest imported review model |
 
-### list — Show current assignments and available models
+Task Lead profiles are selected from `plan.subtasks[].attributes`. They do **not** create new agents; they configure dispatch metadata for the single hidden `task-lead` agent. Current profile models are recommendations/fallback metadata unless the runtime supports per-task model override.
+
+| Profile | Matching attributes | Best models first |
+| --- | --- | --- |
+| `quick` | `quick` | fastest low-cost imported model |
+| `code` | `code` | strong bounded implementation model |
+| `research` | `research`, `docs` | fast research or documentation lookup model |
+| `writing` | `writing` | clear prose/documentation model |
+| `visual` | `multimodal`, `visual` | visual-capable or strong UI reasoning model |
+| `deep` | `deep`, `large-context` | stronger long-context reasoning model |
+| `risk-high` | `risk-high`, `security`, `migration` | strong critical-reasoning model |
+
+### list — Show current role/profile assignments and available models
 
 ```
 bounded_lite_model_config({ action: "list" })
 ```
 
-### apply — Manually assign models to specific roles
+### apply — Manually assign models to roles and profiles
 
 ```
 bounded_lite_model_config({ action: "apply", assignments: { "command-lead": "openai/gpt-5.4", "explore": "openai/gpt-5.4-mini" } })
 ```
 
-The `assignments` object maps role names to `provider/model` strings. Only known roles are updated. Unknown roles are skipped. Models outside the imported pool are rejected by default.
+The `assignments` object maps role names to `provider/model` strings. The `taskLeadProfileAssignments` object maps profile names to `provider/model` strings. Only known roles/profiles are updated. Unknown entries are skipped. Models outside the imported pool are rejected by default.
+
+The same command can preview and apply Task Lead profile models without adding new agents. Profiles are selected from `plan.subtasks[].attributes` and currently act as dispatch metadata unless the runtime supports per-task model override:
+
+```
+bounded_lite_model_config({ action: "apply", taskLeadProfileAssignments: { "code": "opencode/claude-sonnet-4-6", "quick": "opencode-go/minimax-m2.7-highspeed" } })
+```
+
+Built-in profiles include `quick`, `code`, `research`, `writing`, `visual`, `deep`, and `risk-high`.
+
+You may apply both groups together:
+
+```
+bounded_lite_model_config({
+  action: "apply",
+  assignments: {
+    "command-lead": "openai/gpt-5.4",
+    "task-lead": "opencode/kimi-k2.5"
+  },
+  taskLeadProfileAssignments: {
+    "code": "opencode/claude-sonnet-4-6",
+    "quick": "opencode-go/minimax-m2.7-highspeed",
+    "visual": "google/gemini-3.1-pro"
+  }
+})
+```
 
 **Typical workflow**: Run `action=import`, then `action=auto`, ask the user whether they want changes, then use `action=apply`.
 

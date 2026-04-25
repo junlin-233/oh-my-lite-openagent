@@ -21,6 +21,7 @@
 - `tsconfig.json` 只编译 `.opencode/**/*.ts`、`tests/**/*.ts`、`vitest.config.ts`；仓库根目录其他 `.ts` 文件默认不在构建范围内。
 - `dist/` 是构建产物，源码修改应落在 `.opencode/**` 或 `scripts/install.mjs`，不要把修复直接做在 `dist/`。
 - 角色模型配置命令 `/agent-models` 的模板定义在 `opencode.json`，实际实现是插件工具 `bounded_lite_model_config`，两者要保持语义一致。
+- 计划 artifact 默认写入项目内 `.liteagent/plans/`，索引为 `.liteagent/plan-index.jsonl`；不要把用户计划写进 `.opencode/`。
 
 ## 安装器与配置合并规则
 - `scripts/install.mjs` 只托管并复制 `.opencode/{agents,plugins,lib}` 到目标 OpenCode 配置目录。
