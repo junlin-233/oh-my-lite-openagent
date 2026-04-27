@@ -522,12 +522,13 @@ function isManagedPluginSpec(spec) {
   return typeof value === "string" && value.includes(PLUGIN_FILE);
 }
 
-function relativePluginSpec(configDir) {
+function relativePluginSpec(configDir, taskLeadProfiles) {
   return [
     "./.opencode/plugins/bounded-lite.ts",
     {
       ...DEFAULT_PLUGIN_OPTIONS,
       configDir,
+      ...(isRecord(taskLeadProfiles) ? { taskLeadProfiles } : {}),
     },
   ];
 }
@@ -546,7 +547,31 @@ function mergeManagedAgent(sourceAgent, existingAgent) {
   };
 }
 
+function readManagedPluginOptions(config) {
+  const plugins = Array.isArray(config.plugin)
+    ? config.plugin
+    : config.plugin
+      ? [config.plugin]
+      : [];
+
+  for (const spec of plugins) {
+    if (!isManagedPluginSpec(spec)) continue;
+    if (Array.isArray(spec) && isRecord(spec[1])) return spec[1];
+  }
+
+  return {};
+}
+
 function mergeConfig(existingConfig, sourceConfig, configDir) {
+  const legacyTaskLeadProfiles = isRecord(existingConfig.taskLeadProfiles)
+    ? existingConfig.taskLeadProfiles
+    : undefined;
+  const managedPluginOptions = readManagedPluginOptions(existingConfig);
+  const pluginTaskLeadProfiles = isRecord(managedPluginOptions.taskLeadProfiles)
+    ? managedPluginOptions.taskLeadProfiles
+    : undefined;
+  const taskLeadProfiles = pluginTaskLeadProfiles ?? legacyTaskLeadProfiles;
+  const { taskLeadProfiles: _legacyTaskLeadProfiles, ...existingWithoutLegacyProfiles } = existingConfig;
   const existingPlugins = Array.isArray(existingConfig.plugin)
     ? existingConfig.plugin
     : existingConfig.plugin
@@ -555,7 +580,7 @@ function mergeConfig(existingConfig, sourceConfig, configDir) {
 
   const plugins = [
     ...existingPlugins.filter((spec) => !isManagedPluginSpec(spec)),
-    relativePluginSpec(configDir),
+    relativePluginSpec(configDir, taskLeadProfiles),
   ];
   const existingAgents = isRecord(existingConfig.agent) ? existingConfig.agent : {};
   const sourceAgents = isRecord(sourceConfig.agent) ? sourceConfig.agent : {};
@@ -572,7 +597,7 @@ function mergeConfig(existingConfig, sourceConfig, configDir) {
   );
 
   return {
-    ...existingConfig,
+    ...existingWithoutLegacyProfiles,
     $schema: existingConfig.$schema ?? sourceConfig.$schema,
     plugin: plugins,
     default_agent: sourceConfig.default_agent,

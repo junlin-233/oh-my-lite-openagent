@@ -23,9 +23,16 @@ describe("global installer contract", () => {
   });
 
   it("writes the target configDir into the managed plugin options", () => {
-    expect(installScript).toContain("function relativePluginSpec(configDir)");
+    expect(installScript).toContain("function relativePluginSpec(configDir, taskLeadProfiles)");
     expect(installScript).toContain("configDir,");
-    expect(installScript).toContain("relativePluginSpec(configDir)");
+    expect(installScript).toContain("relativePluginSpec(configDir, taskLeadProfiles)");
+  });
+
+  it("migrates legacy top-level Task Lead profiles into plugin options", () => {
+    expect(installScript).toContain("existingConfig.taskLeadProfiles");
+    expect(installScript).toContain("managedPluginOptions.taskLeadProfiles");
+    expect(installScript).toContain("existingWithoutLegacyProfiles");
+    expect(installScript).toContain("taskLeadProfiles } : {})");
   });
 
   it("keeps model provider source classification in the installer", () => {

@@ -34,6 +34,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+const PLUGIN_FILE = "bounded-lite.ts";
+
 export interface BoundedLitePluginOptions {
   mode?: "full" | "degraded";
   enableHooks?: boolean;
@@ -41,6 +43,7 @@ export interface BoundedLitePluginOptions {
   enableBundledMcp?: boolean;
   maxChildDepth?: number;
   configDir?: string;
+  taskLeadProfiles?: Record<string, unknown>;
 }
 
 export interface NormalizedBoundedLitePluginOptions {
@@ -50,6 +53,7 @@ export interface NormalizedBoundedLitePluginOptions {
   enableBundledMcp: boolean;
   maxChildDepth: number;
   configDir?: string;
+  taskLeadProfiles?: Record<string, unknown>;
 }
 
 export function normalizePluginOptions(
@@ -65,6 +69,11 @@ export function normalizePluginOptions(
     maxChildDepth: options.maxChildDepth ?? MAX_CHILD_ORCHESTRATOR_DEPTH,
     ...(typeof options.configDir === "string" && options.configDir.trim() !== ""
       ? { configDir: options.configDir }
+      : {}),
+    ...(typeof options.taskLeadProfiles === "object" &&
+        options.taskLeadProfiles !== null &&
+        !Array.isArray(options.taskLeadProfiles)
+      ? { taskLeadProfiles: options.taskLeadProfiles }
       : {}),
   };
 }
@@ -112,6 +121,146 @@ function resolveProjectRoot(input: PluginInput): string {
 
 function readString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
+}
+
+function readStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.trim() !== "")
+    : [];
+}
+
+function isBoundedLitePluginSpec(spec: unknown): boolean {
+  const value = Array.isArray(spec) ? spec[0] : spec;
+  return typeof value === "string" && value.includes(PLUGIN_FILE);
+}
+
+function readBoundedLitePluginOptions(config: Record<string, unknown>): Record<string, unknown> {
+  const rawPlugins = Array.isArray(config["plugin"])
+    ? config["plugin"]
+    : config["plugin"]
+      ? [config["plugin"]]
+      : [];
+
+  for (const spec of rawPlugins) {
+    if (!isBoundedLitePluginSpec(spec)) continue;
+    if (Array.isArray(spec) && isRecord(spec[1])) return spec[1];
+  }
+
+  return {};
+}
+
+function configuredTaskLeadProfiles(
+  config: Record<string, unknown>,
+  options: NormalizedBoundedLitePluginOptions,
+): Record<string, unknown> {
+  const pluginOptions = readBoundedLitePluginOptions(config);
+  if (isRecord(pluginOptions["taskLeadProfiles"])) return pluginOptions["taskLeadProfiles"];
+  if (isRecord(options.taskLeadProfiles)) return options.taskLeadProfiles;
+  return isRecord(config["taskLeadProfiles"]) ? config["taskLeadProfiles"] : {};
+}
+
+function withConfiguredTaskLeadProfiles(
+  config: Record<string, unknown>,
+  options: NormalizedBoundedLitePluginOptions,
+): Record<string, unknown> {
+  return {
+    ...config,
+    taskLeadProfiles: configuredTaskLeadProfiles(config, options),
+  };
+}
+
+function updateBoundedLitePluginOptions(
+  config: Record<string, unknown>,
+  updater: (pluginOptions: Record<string, unknown>) => Record<string, unknown>,
+): void {
+  const rawPlugins = Array.isArray(config["plugin"])
+    ? config["plugin"]
+    : config["plugin"]
+      ? [config["plugin"]]
+      : [];
+  let updated = false;
+
+  const plugins = rawPlugins.map((spec) => {
+    if (!isBoundedLitePluginSpec(spec)) return spec;
+
+    if (Array.isArray(spec)) {
+      const next = [...spec];
+      const existingOptions = isRecord(spec[1]) ? spec[1] : {};
+      next[1] = updater(existingOptions);
+      updated = true;
+      return next;
+    }
+
+    updated = true;
+    return [spec, updater({})];
+  });
+
+  if (updated) config["plugin"] = plugins;
+}
+
+function writeTaskLeadProfilesToPluginOptions(
+  config: Record<string, unknown>,
+  taskLeadProfiles: Record<string, unknown>,
+): void {
+  updateBoundedLitePluginOptions(config, (pluginOptions) => ({
+    ...pluginOptions,
+    taskLeadProfiles,
+  }));
+  delete config["taskLeadProfiles"];
+}
+
+function taskLeadProfilesToDispatch(
+  taskLeadProfiles: Record<string, unknown>,
+): Partial<TaskDispatchConfig> {
+  const profileModelMap: Record<string, string> = {};
+  const profileFallbackModelMap: Record<string, string[]> = {};
+  const attributeProfileMap: Record<string, string> = {};
+
+  for (const [profileName, rawProfile] of Object.entries(taskLeadProfiles)) {
+    if (!isRecord(rawProfile)) continue;
+
+    const model = readString(rawProfile["model"]);
+    const fallbackModels = readStringArray(rawProfile["fallbackModels"]);
+    const attributes = readStringArray(rawProfile["attributes"]);
+
+    if (model) profileModelMap[profileName] = model;
+    if (fallbackModels.length > 0) profileFallbackModelMap[profileName] = fallbackModels;
+
+    for (const attribute of attributes) {
+      attributeProfileMap[attribute] = profileName;
+    }
+  }
+
+  return {
+    ...(Object.keys(profileModelMap).length > 0 ? { profileModelMap } : {}),
+    ...(Object.keys(profileFallbackModelMap).length > 0 ? { profileFallbackModelMap } : {}),
+    ...(Object.keys(attributeProfileMap).length > 0 ? { attributeProfileMap } : {}),
+  };
+}
+
+function mergeTaskDispatchWithConfiguredProfiles(
+  dispatch: Record<string, unknown>,
+  options: NormalizedBoundedLitePluginOptions,
+): Partial<TaskDispatchConfig> {
+  const profileDispatch = taskLeadProfilesToDispatch(options.taskLeadProfiles ?? {});
+  const inputDispatch = dispatch as Partial<TaskDispatchConfig>;
+
+  return {
+    ...profileDispatch,
+    ...inputDispatch,
+    profileModelMap: {
+      ...(profileDispatch.profileModelMap ?? {}),
+      ...(isRecord(inputDispatch.profileModelMap) ? inputDispatch.profileModelMap : {}),
+    },
+    profileFallbackModelMap: {
+      ...(profileDispatch.profileFallbackModelMap ?? {}),
+      ...(isRecord(inputDispatch.profileFallbackModelMap) ? inputDispatch.profileFallbackModelMap : {}),
+    },
+    attributeProfileMap: {
+      ...(profileDispatch.attributeProfileMap ?? {}),
+      ...(isRecord(inputDispatch.attributeProfileMap) ? inputDispatch.attributeProfileMap : {}),
+    },
+  };
 }
 
 async function readOpenCodeConfig(configDir?: string): Promise<Record<string, unknown>> {
@@ -189,12 +338,6 @@ function readModelPoolPolicy(args: Record<string, unknown>): ModelPoolPolicy {
   };
 }
 
-function readStringArray(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === "string" && item.trim() !== "")
-    : [];
-}
-
 function readFamilyArray(value: unknown): ModelFamily[] {
   const valid = new Set<ModelFamily>(["gpt", "claude", "gemini", "kimi", "minimax", "glm", "codex", "other"]);
   return readStringArray(value).filter((item): item is ModelFamily => valid.has(item as ModelFamily));
@@ -248,7 +391,10 @@ export function createBoundedLitePlugin(
         description: "Validate a required plan.subtasks payload and return bounded DAG waves plus dispatch profiles.",
         execute(args) {
           const payload = args["payload"];
-          const dispatch = isRecord(args["dispatch"]) ? args["dispatch"] : {};
+          const dispatch = mergeTaskDispatchWithConfiguredProfiles(
+            isRecord(args["dispatch"]) ? args["dispatch"] : {},
+            options,
+          );
 
           return buildTaskDAG(payload, dispatch as Partial<TaskDispatchConfig>);
         },
@@ -257,7 +403,10 @@ export function createBoundedLitePlugin(
         description: "Validate a Plan Builder artifact against readiness gates before Command Lead dispatches execution.",
         execute(args) {
           const payload = args["payload"];
-          const dispatch = isRecord(args["dispatch"]) ? args["dispatch"] : {};
+          const dispatch = mergeTaskDispatchWithConfiguredProfiles(
+            isRecord(args["dispatch"]) ? args["dispatch"] : {},
+            options,
+          );
 
           return validatePlanReadiness(payload, dispatch as Partial<TaskDispatchConfig>);
         },
@@ -357,14 +506,15 @@ If no provider models are found, tell the user to configure or connect OpenCode 
         async execute(args, context) {
           const action = typeof args["action"] === "string" ? args["action"] : "list";
           const config = await readOpenCodeConfig(options.configDir);
+          const effectiveConfig = withConfiguredTaskLeadProfiles(config, options);
           const credentialModels = listKnownModelsForCredentialProviders(
             await readOpenCodeAuthProviderIds(),
           );
           const models = mergeProviderModels(
             mergeProviderModels(await listRuntimeProviderModels(context), credentialModels),
-            listProviderModels(config),
+            listProviderModels(effectiveConfig),
           );
-          const inferredPolicy = inferModelPoolPolicy(config, readModelPoolPolicy(args));
+          const inferredPolicy = inferModelPoolPolicy(effectiveConfig, readModelPoolPolicy(args));
           const poolPolicy = inferredPolicy.policy;
           const importedPool = importModelPool(models, poolPolicy);
 
@@ -380,13 +530,13 @@ If no provider models are found, tell the user to configure or connect OpenCode 
           }
 
           if (action === "list") {
-            const roleLines = summarizeRoleModels(config).map((role) => {
+            const roleLines = summarizeRoleModels(effectiveConfig).map((role) => {
               const source = role.inheritsGlobal ? "inherits global" : "configured";
               return `- ${role.role}: ${role.effectiveModel ?? "<unset>"} (${source})`;
             });
 
 	            const runtimeModels = await listRuntimeProviderModels(context);
-	            const configModels = listProviderModels(config);
+	            const configModels = listProviderModels(effectiveConfig);
 	            const credentialModels = listKnownModelsForCredentialProviders(
 	              await readOpenCodeAuthProviderIds(),
 	            );
@@ -422,24 +572,24 @@ If no provider models are found, tell the user to configure or connect OpenCode 
             }
 
             return formatModelConfigReport({
-              roles: summarizeRoleModels(config),
-              taskLeadProfiles: summarizeTaskLeadProfileModels(config),
+              roles: summarizeRoleModels(effectiveConfig),
+              taskLeadProfiles: summarizeTaskLeadProfileModels(effectiveConfig),
               models,
             });
           }
 
           if (action === "auto") {
-            const autoResult = resolveAutoModels(importedPool, config);
+            const autoResult = resolveAutoModels(importedPool, effectiveConfig);
             const profileAutoResult = resolveAutoTaskLeadProfileModels(importedPool);
 
             if (importedPool.length === 0 && autoResult.resolved.length === 0 && profileAutoResult.resolved.length === 0) {
-              const roleLines = summarizeRoleModels(config).map((role) => {
+              const roleLines = summarizeRoleModels(effectiveConfig).map((role) => {
                 const source = role.inheritsGlobal ? "inherits global" : "configured";
                 return `- ${role.role}: ${role.effectiveModel ?? "<unset>"} (${source})`;
               });
 
 	              const runtimeModels = await listRuntimeProviderModels(context);
-	              const configModels = listProviderModels(config);
+	              const configModels = listProviderModels(effectiveConfig);
 	              const credentialModels = listKnownModelsForCredentialProviders(
 	                await readOpenCodeAuthProviderIds(),
 	              );
@@ -478,8 +628,8 @@ If no provider models are found, tell the user to configure or connect OpenCode 
               formatTaskLeadProfileModelReport(profileAutoResult),
               "",
               formatModelConfigReport({
-                roles: summarizeRoleModels(config),
-                taskLeadProfiles: summarizeTaskLeadProfileModels(config),
+                roles: summarizeRoleModels(effectiveConfig),
+                taskLeadProfiles: summarizeTaskLeadProfileModels(effectiveConfig),
                 models: importedPool,
               }),
               "",
@@ -518,20 +668,33 @@ If no provider models are found, tell the user to configure or connect OpenCode 
                 allowUnavailableModels: args["allowUnavailableModels"] === true,
               },
             ) : { changed: [], skipped: [], warnings: [] };
+            const profileConfig = withConfiguredTaskLeadProfiles(config, options);
             const profileResult = hasProfileAssignments ? applyTaskLeadProfileModelConfig(
-              config,
+              profileConfig,
               taskLeadProfileAssignments as Record<string, unknown>,
               importedPool.map((model) => model.id),
               {
                 allowUnavailableModels: args["allowUnavailableModels"] === true,
               },
             ) : { changed: [], skipped: [], warnings: [] };
+            if (hasProfileAssignments || isRecord(config["taskLeadProfiles"])) {
+              const profiles = isRecord(profileConfig["taskLeadProfiles"])
+                ? profileConfig["taskLeadProfiles"]
+                : {};
+              writeTaskLeadProfilesToPluginOptions(config, profiles);
+            }
+            const updatedEffectiveConfig = withConfiguredTaskLeadProfiles(config, {
+              ...options,
+              taskLeadProfiles: isRecord(profileConfig["taskLeadProfiles"])
+                ? profileConfig["taskLeadProfiles"]
+                : {},
+            });
             const configPath = await writeOpenCodeConfig(config, options.configDir);
 
             return [
               formatModelConfigReport({
-                roles: summarizeRoleModels(config),
-                taskLeadProfiles: summarizeTaskLeadProfileModels(config),
+                roles: summarizeRoleModels(updatedEffectiveConfig),
+                taskLeadProfiles: summarizeTaskLeadProfileModels(updatedEffectiveConfig),
                 models: importedPool,
                 changed: result.changed,
                 skipped: result.skipped,
