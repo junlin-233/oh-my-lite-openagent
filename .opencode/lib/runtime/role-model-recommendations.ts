@@ -33,9 +33,12 @@ export interface ProviderModel {
   model: string;
   id: string;
   name?: string;
+  apiModelId?: string;
   source?: "opencode-subscription" | "api-provider" | "gateway" | "unknown";
   family?: "gpt" | "claude" | "gemini" | "kimi" | "minimax" | "glm" | "codex" | "other";
-  origin?: "opencode-json-provider" | "runtime-provider-list" | "configured-model" | "credential-provider-fallback";
+  origin?: "opencode-json-provider" | "runtime-provider-list" | "models-dev-fallback" | "configured-model" | "credential-provider-fallback";
+  reasoning?: boolean;
+  variants?: string[];
 }
 
 export type RoleCapability =

@@ -29,6 +29,21 @@
 
 ### 安装
 
+通过 npm 安装（发布到 npm 后）：
+
+```bash
+npm install -g oh-my-lite-openagent
+oh-my-lite-openagent
+```
+
+不全局安装，直接运行：
+
+```bash
+npx oh-my-lite-openagent
+```
+
+从源码安装：
+
 ```bash
 git clone https://github.com/junlin-233/oh-my-lite-openagent.git
 cd oh-my-lite-openagent
@@ -103,8 +118,57 @@ npm run install:opencode -- --config-dir /path/to/opencode-config
 只演练不写入：
 
 ```bash
+oh-my-lite-openagent --dry-run
+# 或在源码仓库中：
 node scripts/install.mjs --dry-run
 ```
+
+交互式模型配置：
+
+```bash
+oh-my-lite-openagent --interactive
+```
+
+## npm 包发布流程
+
+包会暴露两个 CLI 名称：`oh-my-lite-openagent` 和 `omlo-install`。
+
+发布前先检查：
+
+```bash
+npm install
+npm test
+npm run typecheck
+npm run pack:dry-run
+```
+
+发布演练：
+
+```bash
+npm run publish:dry-run
+```
+
+确认后发布：
+
+```bash
+npm publish
+```
+
+如果 npm 提示输入一次性验证码（OTP），打开 npm 账号绑定的验证器 App，输入对应的 6 位验证码；也可以直接传入：
+
+```bash
+npm publish --otp 123456
+```
+
+如果不想交互式输入 OTP，可以在 npm 创建带发布权限且支持 bypass/automation 的 granular access token，然后用 token 发布：
+
+```bash
+npm config set //registry.npmjs.org/:_authToken=YOUR_NPM_TOKEN
+npm publish
+npm config delete //registry.npmjs.org/:_authToken
+```
+
+真实发布前 `prepublishOnly` 会自动执行测试、类型检查和打包演练。
 
 ## 角色与 Task Lead Profile 模型配置
 

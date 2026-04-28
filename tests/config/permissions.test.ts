@@ -3,6 +3,7 @@ import path from "node:path";
 
 const configPath = path.resolve(process.cwd(), "opencode.json");
 const config = JSON.parse(readFileSync(configPath, "utf8")) as {
+  permission?: Record<string, string | Record<string, string>>;
   agent: Record<
     string,
     { permission?: Record<string, string | Record<string, string>> }
@@ -74,5 +75,35 @@ describe("delegation boundaries", () => {
     expect(config.agent.explore?.permission?.websearch).toBe("deny");
     expect(config.agent.librarian?.permission?.webfetch).toBe("allow");
     expect(config.agent.librarian?.permission?.websearch).toBe("allow");
+  });
+
+  it("allows common safe validation commands while asking for other bash commands", () => {
+    const bash = config.permission?.bash;
+    expect(typeof bash).toBe("object");
+    if (typeof bash !== "object" || bash === null) return;
+
+    expect(Object.keys(bash)[0]).toBe("*");
+    expect(bash["*"]).toBe("ask");
+    expect(bash["git status --short"]).toBe("allow");
+    expect(bash["git diff"]).toBe("allow");
+    expect(bash["npm test"]).toBe("allow");
+    expect(bash["npm run typecheck"]).toBe("allow");
+    expect(bash["node scripts/install.mjs --dry-run"]).toBe("allow");
+  });
+
+  it("keeps Task Lead non-interactive by allowing edits and denying non-whitelisted bash", () => {
+    const taskLeadPermission = config.agent["task-lead"]?.permission;
+    const edit = taskLeadPermission?.edit;
+    const bash = taskLeadPermission?.bash;
+
+    expect(edit).toEqual({ "*": "allow" });
+    expect(typeof bash).toBe("object");
+    if (typeof bash !== "object" || bash === null) return;
+
+    expect(Object.keys(bash)[0]).toBe("*");
+    expect(bash["*"]).toBe("deny");
+    expect(bash["npm test"]).toBe("allow");
+    expect(bash["npm run typecheck"]).toBe("allow");
+    expect(Object.values(bash)).not.toContain("ask");
   });
 });

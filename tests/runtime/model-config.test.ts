@@ -1,16 +1,19 @@
 import {
   applyTaskLeadProfileModelConfig,
   applyRoleModelConfig,
+  applyRoleReasoningEffortConfig,
   classifyModelFamily,
   classifyModelProvider,
   formatModelConfigReport,
   importModelPool,
   inferModelPoolPolicy,
   listKnownModelsForCredentialProviders,
+  listProviderModelsFromModelsDevResponse,
   listProviderModelsFromResponse,
   listProviderModels,
   mergeProviderModels,
   resolveAutoModels,
+  resolveAutoReasoningEffortAssignments,
   resolveAutoTaskLeadProfileModels,
   summarizeRoleModels,
   summarizeTaskLeadProfileModels,
@@ -62,6 +65,71 @@ describe("role model configuration", () => {
       "api-provider",
       "api-provider",
     ]);
+  });
+
+  it("lists provider models from provider maps, aliases, arrays, and model metadata", () => {
+    const models = listProviderModelsFromResponse({
+      data: {
+        all: {
+          openai: {
+            models: {
+              alias: {
+                id: "gpt-5",
+                name: "GPT-5 Alias",
+                reasoning: true,
+                variants: {
+                  high: { reasoningEffort: "high" },
+                  low: { reasoningEffort: "low" },
+                },
+              },
+            },
+          },
+          anthropic: {
+            models: [
+              { id: "claude-sonnet-4-6", name: "Claude Sonnet", reasoning: true },
+            ],
+          },
+        },
+      },
+    });
+
+    expect(models.map((model) => model.id)).toEqual([
+      "anthropic/claude-sonnet-4-6",
+      "openai/alias",
+    ]);
+    expect(models.find((model) => model.id === "openai/alias")).toMatchObject({
+      apiModelId: "gpt-5",
+      name: "GPT-5 Alias",
+      reasoning: true,
+      variants: ["high", "low"],
+    });
+  });
+
+  it("can read models.dev fallback pools for connected providers", () => {
+    const models = listProviderModelsFromModelsDevResponse(
+      {
+        openai: {
+          id: "openai",
+          models: {
+            "gpt-5": { id: "gpt-5", name: "GPT-5", reasoning: true },
+          },
+        },
+        anthropic: {
+          id: "anthropic",
+          models: {
+            "claude-sonnet": { id: "claude-sonnet", name: "Claude Sonnet" },
+          },
+        },
+      },
+      ["openai"],
+    );
+
+    expect(models).toHaveLength(1);
+    expect(models[0]).toMatchObject({
+      id: "openai/gpt-5",
+      origin: "models-dev-fallback",
+      reasoning: true,
+    });
   });
 
   it("classifies subscription, api, gateway, and unknown providers", () => {
@@ -281,6 +349,50 @@ describe("role model configuration", () => {
         warning: "model was not found in the provider list; writing it anyway",
       },
     ]);
+  });
+
+  it("summarizes and applies role reasoning effort assignments", () => {
+    const config: Record<string, unknown> = {
+      agent: {
+        "command-lead": { mode: "primary", model: "openai/gpt-5", reasoningEffort: "medium" },
+        explore: { mode: "subagent", model: "openai/gpt-5-mini" },
+      },
+    };
+
+    expect(summarizeRoleModels(config).find((role) => role.role === "command-lead")).toMatchObject({
+      configuredReasoningEffort: "medium",
+    });
+
+    const result = applyRoleReasoningEffortConfig(config, {
+      "command-lead": "high",
+      explore: "low",
+      unknown: "high",
+      "plan-builder": "max",
+    });
+
+    expect(result.changed).toEqual([
+      { role: "command-lead", previous: "medium", next: "high" },
+      { role: "explore", previous: undefined, next: "low" },
+    ]);
+    expect(result.skipped).toEqual([
+      { role: "unknown", reason: "unknown role" },
+      { role: "plan-builder", reason: "reasoningEffort must be minimal, low, medium, or high" },
+    ]);
+    expect(summarizeRoleModels(config).find((role) => role.role === "explore")).toMatchObject({
+      configuredReasoningEffort: "low",
+    });
+  });
+
+  it("recommends default reasoning effort by role when auto models resolve", () => {
+    const result = resolveAutoReasoningEffortAssignments({
+      "command-lead": "openai/gpt-5",
+      explore: "openai/gpt-5-mini",
+    });
+
+    expect(result).toEqual({
+      "command-lead": "high",
+      explore: "low",
+    });
   });
 
   it("resolves automatic role model assignments from available provider models", () => {

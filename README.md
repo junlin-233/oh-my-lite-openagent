@@ -29,6 +29,21 @@ This is intentionally lighter than Oh My OpenAgent. No giant runtime, no model l
 
 ### Install
 
+From npm (after the package is published):
+
+```bash
+npm install -g oh-my-lite-openagent
+oh-my-lite-openagent
+```
+
+Or run without a global install:
+
+```bash
+npx oh-my-lite-openagent
+```
+
+From source:
+
 ```bash
 git clone https://github.com/junlin-233/oh-my-lite-openagent.git
 cd oh-my-lite-openagent
@@ -109,8 +124,57 @@ npm run install:opencode -- --config-dir /path/to/opencode-config
 Dry run:
 
 ```bash
+oh-my-lite-openagent --dry-run
+# or, from a source checkout:
 node scripts/install.mjs --dry-run
 ```
+
+Interactive model setup:
+
+```bash
+oh-my-lite-openagent --interactive
+```
+
+## npm Package Publishing
+
+The package exposes the installer as two CLI names: `oh-my-lite-openagent` and `omlo-install`.
+
+Before publishing:
+
+```bash
+npm install
+npm test
+npm run typecheck
+npm run pack:dry-run
+```
+
+Publish dry run:
+
+```bash
+npm run publish:dry-run
+```
+
+Publish to npm when ready:
+
+```bash
+npm publish
+```
+
+If npm asks for a one-time password, enter the 6-digit code from the authenticator app attached to your npm account, or pass it directly:
+
+```bash
+npm publish --otp 123456
+```
+
+If you prefer not to enter OTP interactively, create a granular npm access token with publish permission and bypass/automation support, then publish with that token:
+
+```bash
+npm config set //registry.npmjs.org/:_authToken=YOUR_NPM_TOKEN
+npm publish
+npm config delete //registry.npmjs.org/:_authToken
+```
+
+`prepublishOnly` runs the test suite, typecheck, and package dry run automatically before a real publish.
 
 ## Role and Task Lead Profile Model Configuration
 

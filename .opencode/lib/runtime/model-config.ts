@@ -37,6 +37,7 @@ export interface RoleModelSummary {
   mode?: string;
   configuredModel?: string;
   effectiveModel?: string;
+  configuredReasoningEffort?: ReasoningEffort;
   inheritsGlobal: boolean;
 }
 
@@ -54,9 +55,12 @@ export interface ProviderModel {
   model: string;
   id: string;
   name?: string;
+  apiModelId?: string;
   source?: ModelProviderSource;
   family?: ModelFamily;
   origin?: ModelOrigin;
+  reasoning?: boolean;
+  variants?: string[];
 }
 
 export type ModelProviderSource =
@@ -78,8 +82,11 @@ export type ModelFamily =
 export type ModelOrigin =
   | "opencode-json-provider"
   | "runtime-provider-list"
+  | "models-dev-fallback"
   | "configured-model"
   | "credential-provider-fallback";
+
+export type ReasoningEffort = "minimal" | "low" | "medium" | "high";
 
 export interface ModelPoolPolicy {
   source?: ModelProviderSource | "all";
@@ -125,6 +132,18 @@ export interface ApplyTaskLeadProfileModelConfigResult {
   }>;
 }
 
+export interface ApplyRoleReasoningEffortConfigResult {
+  changed: Array<{
+    role: RoleName;
+    previous?: ReasoningEffort;
+    next: ReasoningEffort;
+  }>;
+  skipped: Array<{
+    role: string;
+    reason: string;
+  }>;
+}
+
 export function listProviderModels(config: Record<string, unknown>): ProviderModel[] {
   const providerConfig = config["provider"];
 
@@ -138,15 +157,13 @@ export function listProviderModels(config: Record<string, unknown>): ProviderMod
       // Check for provider.models format
       if (isRecord(providerValue["models"])) {
         for (const [model, modelValue] of Object.entries(providerValue["models"])) {
-          const name = isRecord(modelValue) && typeof modelValue["name"] === "string"
-            ? modelValue["name"]
-            : undefined;
+          const metadata = readModelMetadata(modelValue);
 
           models.push({
             provider,
             model,
             id: `${provider}/${model}`,
-            ...(name ? { name } : {}),
+            ...metadata,
             source: classifyModelProvider(provider),
             family: classifyModelFamily(`${provider}/${model}`),
             origin: "opencode-json-provider",
@@ -234,39 +251,56 @@ export function listProviderModels(config: Record<string, unknown>): ProviderMod
   return models.sort((left, right) => left.id.localeCompare(right.id));
 }
 
-export function listProviderModelsFromResponse(response: unknown): ProviderModel[] {
+export function listProviderModelsFromResponse(
+  response: unknown,
+  origin: ModelOrigin = "runtime-provider-list",
+): ProviderModel[] {
   const payload = unwrapResponseData(response);
   const providers = extractProviders(payload);
   const models: ProviderModel[] = [];
 
-  for (const provider of providers) {
-    if (!isRecord(provider) || typeof provider["id"] !== "string") continue;
+  for (const entry of providers) {
+    const provider = entry.value;
+    if (!isRecord(provider)) continue;
 
-    const providerID = provider["id"];
+    const providerID = typeof provider["id"] === "string" ? provider["id"] : entry.id;
+    if (!providerID) continue;
     const providerModels = provider["models"];
-    if (!isRecord(providerModels)) continue;
+    const modelEntries = readProviderModelEntries(providerModels);
+    if (modelEntries.length === 0) continue;
 
-    for (const [modelKey, modelValue] of Object.entries(providerModels)) {
-      const modelID = isRecord(modelValue) && typeof modelValue["id"] === "string"
+    for (const [modelKey, modelValue] of modelEntries) {
+      const modelID = modelKey || (isRecord(modelValue) && typeof modelValue["id"] === "string"
         ? modelValue["id"]
-        : modelKey;
-      const name = isRecord(modelValue) && typeof modelValue["name"] === "string"
-        ? modelValue["name"]
-        : undefined;
+        : undefined);
+      if (!modelID) continue;
+      const metadata = readModelMetadata(modelValue);
 
       models.push({
         provider: providerID,
         model: modelID,
         id: `${providerID}/${modelID}`,
-        ...(name ? { name } : {}),
+        ...metadata,
         source: classifyModelProvider(providerID),
         family: classifyModelFamily(`${providerID}/${modelID}`),
-        origin: "runtime-provider-list",
+        origin,
       });
     }
   }
 
   return dedupeModels(models);
+}
+
+export function listProviderModelsFromModelsDevResponse(
+  response: unknown,
+  providerIds: readonly string[] = [],
+): ProviderModel[] {
+  const providerFilter = new Set(providerIds.map((provider) => provider.toLowerCase()));
+  const models = listProviderModelsFromResponse(response, "models-dev-fallback");
+
+  if (providerFilter.size === 0) return models;
+
+  return models.filter((model) => providerFilter.has(model.provider.toLowerCase()));
 }
 
 export function mergeProviderModels(
@@ -284,7 +318,9 @@ export function listKnownModelsForCredentialProviders(providerIds: readonly stri
     models.push(
       { provider: "opencode", model: "claude-opus-4-7", id: "opencode/claude-opus-4-7" },
       { provider: "opencode", model: "claude-sonnet-4-6", id: "opencode/claude-sonnet-4-6" },
+      { provider: "opencode", model: "gpt-5.5", id: "opencode/gpt-5.5" },
       { provider: "opencode", model: "gpt-5.4", id: "opencode/gpt-5.4" },
+      { provider: "opencode", model: "gpt-5.4-mini", id: "opencode/gpt-5.4-mini" },
       { provider: "opencode", model: "big-pickle", id: "opencode/big-pickle" },
       { provider: "opencode", model: "kimi-k2.5", id: "opencode/kimi-k2.5" },
     );
@@ -360,6 +396,7 @@ export function summarizeRoleModels(config: Record<string, unknown>): RoleModelS
   return CONFIGURABLE_ROLE_NAMES.map((role) => {
     const agent = isRecord(agents[role]) ? agents[role] : {};
     const configuredModel = typeof agent["model"] === "string" ? agent["model"] : undefined;
+    const configuredReasoningEffort = readReasoningEffort(agent);
     const mode = typeof agent["mode"] === "string" ? agent["mode"] : undefined;
     const effectiveModel = configuredModel ?? globalModel;
 
@@ -368,6 +405,7 @@ export function summarizeRoleModels(config: Record<string, unknown>): RoleModelS
       ...(mode ? { mode } : {}),
       ...(configuredModel ? { configuredModel } : {}),
       ...(effectiveModel ? { effectiveModel } : {}),
+      ...(configuredReasoningEffort ? { configuredReasoningEffort } : {}),
       inheritsGlobal: !configuredModel,
     };
   });
@@ -521,6 +559,64 @@ export function applyTaskLeadProfileModelConfig(
   return { changed, skipped, warnings };
 }
 
+export function applyRoleReasoningEffortConfig(
+  config: Record<string, unknown>,
+  assignments: Record<string, unknown>,
+): ApplyRoleReasoningEffortConfigResult {
+  const agents = ensureRecord(config, "agent");
+  const validRoles = new Set<string>(CONFIGURABLE_ROLE_NAMES);
+  const changed: ApplyRoleReasoningEffortConfigResult["changed"] = [];
+  const skipped: ApplyRoleReasoningEffortConfigResult["skipped"] = [];
+
+  for (const [role, effortValue] of Object.entries(assignments)) {
+    if (!validRoles.has(role)) {
+      skipped.push({ role, reason: "unknown role" });
+      continue;
+    }
+
+    const effort = normalizeReasoningEffort(effortValue);
+    if (!effort) {
+      skipped.push({ role, reason: "reasoningEffort must be minimal, low, medium, or high" });
+      continue;
+    }
+
+    const agent = ensureRecord(agents, role);
+    const previous = readReasoningEffort(agent);
+    agent["reasoningEffort"] = effort;
+
+    changed.push({
+      role: role as RoleName,
+      ...(previous ? { previous } : {}),
+      next: effort,
+    });
+  }
+
+  return { changed, skipped };
+}
+
+export function resolveAutoReasoningEffortAssignments(
+  modelAssignments: Record<string, string> = {},
+): Record<string, ReasoningEffort> {
+  const defaults: Record<RoleName, ReasoningEffort> = {
+    "command-lead": "high",
+    "plan-builder": "high",
+    "deep-plan-builder": "high",
+    "task-lead": "medium",
+    explore: "low",
+    librarian: "low",
+    "plan-review": "high",
+    "result-review": "high",
+  };
+  const result: Record<string, ReasoningEffort> = {};
+
+  for (const role of CONFIGURABLE_ROLE_NAMES) {
+    if (Object.keys(modelAssignments).length > 0 && !modelAssignments[role]) continue;
+    result[role] = defaults[role];
+  }
+
+  return result;
+}
+
 export function formatModelConfigReport(input: {
   roles: RoleModelSummary[];
   models: ProviderModel[];
@@ -531,6 +627,8 @@ export function formatModelConfigReport(input: {
   profileChanged?: ApplyTaskLeadProfileModelConfigResult["changed"];
   profileSkipped?: ApplyTaskLeadProfileModelConfigResult["skipped"];
   profileWarnings?: ApplyTaskLeadProfileModelConfigResult["warnings"];
+  reasoningChanged?: ApplyRoleReasoningEffortConfigResult["changed"];
+  reasoningSkipped?: ApplyRoleReasoningEffortConfigResult["skipped"];
 }): string {
   const lines = [
     "Oh My Lite OpenAgent role model configuration",
@@ -538,7 +636,10 @@ export function formatModelConfigReport(input: {
     "Current role models:",
     ...input.roles.map((role) => {
       const source = role.inheritsGlobal ? "inherits global" : "configured";
-      return `- ${role.role}: ${role.effectiveModel ?? "<unset>"} (${source})`;
+      const reasoning = role.configuredReasoningEffort
+        ? `; reasoningEffort=${role.configuredReasoningEffort}`
+        : "";
+      return `- ${role.role}: ${role.effectiveModel ?? "<unset>"} (${source}${reasoning})`;
     }),
     "",
     "Available provider models:",
@@ -548,7 +649,9 @@ export function formatModelConfigReport(input: {
           const source = model.source ?? classifyModelProvider(model.provider);
           const family = model.family ?? classifyModelFamily(model.id);
           const origin = model.origin ? ` ${model.origin}` : "";
-          return `- ${model.id}${model.name ? ` (${model.name})` : ""} [${source}/${family}${origin}]`;
+          const reasoning = typeof model.reasoning === "boolean" ? ` reasoning=${model.reasoning}` : "";
+          const variants = model.variants && model.variants.length > 0 ? ` variants=${model.variants.join(",")}` : "";
+          return `- ${model.id}${model.name ? ` (${model.name})` : ""} [${source}/${family}${origin}${reasoning}${variants}]`;
         })
         : ["- <none found in opencode.json provider config>"]
     ),
@@ -611,6 +714,24 @@ export function formatModelConfigReport(input: {
     lines.push(...input.profileWarnings.map((item) => `- ${item.profile}: ${item.warning}`));
   }
 
+  if (input.reasoningChanged) {
+    lines.push("", "Reasoning effort changes applied:");
+    lines.push(
+      ...(
+        input.reasoningChanged.length > 0
+          ? input.reasoningChanged.map((change) => (
+            `- ${change.role}: ${change.previous ?? "<unset>"} -> ${change.next}`
+          ))
+          : ["- <none>"]
+      ),
+    );
+  }
+
+  if (input.reasoningSkipped && input.reasoningSkipped.length > 0) {
+    lines.push("", "Reasoning effort skipped:");
+    lines.push(...input.reasoningSkipped.map((item) => `- ${item.role}: ${item.reason}`));
+  }
+
   return lines.join("\n");
 }
 
@@ -632,7 +753,9 @@ export function formatModelImportReport(input: {
         ? input.models.map((model) => {
           const modelSource = model.source ?? classifyModelProvider(model.provider);
           const family = model.family ?? classifyModelFamily(model.id);
-          return `- ${model.id} [${modelSource}/${family}]`;
+          const reasoning = typeof model.reasoning === "boolean" ? ` reasoning=${model.reasoning}` : "";
+          const variants = model.variants && model.variants.length > 0 ? ` variants=${model.variants.join(",")}` : "";
+          return `- ${model.id} [${modelSource}/${family}${reasoning}${variants}]`;
         })
         : ["- <none>"]
     ),
@@ -681,8 +804,13 @@ export function classifyModelProvider(provider: string): ModelProviderSource {
 
   if (
     normalized === "openai" ||
+    normalized === "azure" ||
     normalized === "anthropic" ||
     normalized === "google" ||
+    normalized === "bedrock" ||
+    normalized === "groq" ||
+    normalized === "xai" ||
+    normalized === "openrouter" ||
     normalized === "github-copilot" ||
     normalized === "kimi-for-coding"
   ) {
@@ -722,13 +850,81 @@ function withModelMetadata(model: ProviderModel): ProviderModel {
   };
 }
 
-function extractProviders(payload: unknown): unknown[] {
-  if (Array.isArray(payload)) return payload;
+function readProviderModelEntries(providerModels: unknown): Array<[string, unknown]> {
+  if (isRecord(providerModels)) return Object.entries(providerModels);
+
+  if (Array.isArray(providerModels)) {
+    return providerModels.flatMap((modelValue, index): Array<[string, unknown]> => {
+      if (!isRecord(modelValue) || typeof modelValue["id"] !== "string") return [];
+      return [[modelValue["id"] || String(index), modelValue]];
+    });
+  }
+
+  return [];
+}
+
+function readModelMetadata(modelValue: unknown): Partial<ProviderModel> {
+  if (!isRecord(modelValue)) return {};
+
+  const name = typeof modelValue["name"] === "string" ? modelValue["name"] : undefined;
+  const apiModelId = typeof modelValue["id"] === "string" ? modelValue["id"] : undefined;
+  const family = typeof modelValue["family"] === "string"
+    ? classifyModelFamily(modelValue["family"])
+    : undefined;
+  const variants = readVariantNames(modelValue["variants"]);
+  const reasoning = typeof modelValue["reasoning"] === "boolean" ? modelValue["reasoning"] : undefined;
+
+  return {
+    ...(name ? { name } : {}),
+    ...(apiModelId ? { apiModelId } : {}),
+    ...(family ? { family } : {}),
+    ...(typeof reasoning === "boolean" ? { reasoning } : {}),
+    ...(variants.length > 0 ? { variants } : {}),
+  };
+}
+
+function readVariantNames(value: unknown): string[] {
+  if (!isRecord(value)) return [];
+  return Object.keys(value).sort((left, right) => left.localeCompare(right));
+}
+
+function readReasoningEffort(agent: Record<string, unknown>): ReasoningEffort | undefined {
+  return normalizeReasoningEffort(agent["reasoningEffort"])
+    ?? (isRecord(agent["options"]) ? normalizeReasoningEffort(agent["options"]["reasoningEffort"]) : undefined);
+}
+
+export function normalizeReasoningEffort(value: unknown): ReasoningEffort | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase();
+
+  if (
+    normalized === "minimal" ||
+    normalized === "low" ||
+    normalized === "medium" ||
+    normalized === "high"
+  ) {
+    return normalized;
+  }
+
+  return undefined;
+}
+
+function extractProviders(payload: unknown): Array<{ id?: string; value: unknown }> {
+  if (Array.isArray(payload)) return payload.map((value) => ({ value }));
 
   if (!isRecord(payload)) return [];
 
   const providers = payload["providers"] ?? payload["all"];
-  return Array.isArray(providers) ? providers : [];
+  if (Array.isArray(providers)) return providers.map((value) => ({ value }));
+  if (isRecord(providers)) {
+    return Object.entries(providers)
+      .filter(([, value]) => isRecord(value) && (isRecord(value["models"]) || Array.isArray(value["models"])))
+      .map(([id, value]) => ({ id, value }));
+  }
+
+  return Object.entries(payload)
+    .filter(([, value]) => isRecord(value) && (isRecord(value["models"]) || Array.isArray(value["models"])))
+    .map(([id, value]) => ({ id, value }));
 }
 
 function unwrapResponseData(response: unknown): unknown {

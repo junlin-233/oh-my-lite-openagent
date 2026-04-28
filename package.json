@@ -1,16 +1,54 @@
 {
   "name": "oh-my-lite-openagent",
-  "private": true,
+  "version": "0.1.0",
+  "description": "A lightweight global OpenCode orchestration plugin with bounded agents and install tooling.",
   "type": "module",
+  "bin": {
+    "oh-my-lite-openagent": "scripts/install.mjs",
+    "omlo-install": "scripts/install.mjs"
+  },
+  "files": [
+    ".opencode/agents/",
+    ".opencode/plugins/",
+    ".opencode/lib/",
+    "scripts/install.mjs",
+    "opencode.json",
+    "README.md",
+    "README.zh-CN.md",
+    "AI-INSTALL.md",
+    "AGENTS.md"
+  ],
+  "keywords": [
+    "opencode",
+    "openagent",
+    "agent",
+    "orchestration",
+    "plugin"
+  ],
+  "homepage": "https://github.com/junlin-233/oh-my-lite-openagent#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/junlin-233/oh-my-lite-openagent.git"
+  },
+  "bugs": {
+    "url": "https://github.com/junlin-233/oh-my-lite-openagent/issues"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "install:opencode": "node scripts/install.mjs",
+    "pack:dry-run": "npm pack --dry-run",
+    "publish:dry-run": "npm publish --dry-run",
+    "prepublishOnly": "npm test && npm run typecheck && npm run pack:dry-run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
     "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "vitest": "^4.1.5"
   }
 }

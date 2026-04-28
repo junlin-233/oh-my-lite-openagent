@@ -11,6 +11,7 @@ import { writePlanArtifact } from "../lib/runtime/plan-artifact.js";
 import { createRuntimeProfile } from "../lib/runtime/safety.js";
 import {
   applyRoleModelConfig,
+  applyRoleReasoningEffortConfig,
   applyTaskLeadProfileModelConfig,
   formatAutoModelReport,
   formatModelImportReport,
@@ -20,12 +21,14 @@ import {
   inferModelPoolPolicy,
   listKnownModelsForCredentialProviders,
   listProviderModels,
+  listProviderModelsFromModelsDevResponse,
   listProviderModelsFromResponse,
   mergeProviderModels,
   type ModelFamily,
   type ModelPoolPolicy,
   type ModelProviderSource,
   resolveAutoModels,
+  resolveAutoReasoningEffortAssignments,
   resolveAutoTaskLeadProfileModels,
   summarizeRoleModels,
   summarizeTaskLeadProfileModels,
@@ -314,6 +317,24 @@ async function listRuntimeProviderModels(input: PluginInput): Promise<ReturnType
   }
 }
 
+async function listModelsDevProviderModels(providerIds: readonly string[]): Promise<ReturnType<typeof listProviderModels>> {
+  if (providerIds.length === 0) return [];
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 4_000);
+
+  try {
+    const response = await fetch("https://models.dev/api.json", { signal: controller.signal });
+    if (!response.ok) return [];
+
+    return listProviderModelsFromModelsDevResponse(await response.json(), providerIds);
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function readModelPoolPolicy(args: Record<string, unknown>): ModelPoolPolicy {
   const policy = isRecord(args["policy"]) ? args["policy"] : {};
   const sourceValue = typeof policy["source"] === "string"
@@ -341,6 +362,44 @@ function readModelPoolPolicy(args: Record<string, unknown>): ModelPoolPolicy {
 function readFamilyArray(value: unknown): ModelFamily[] {
   const valid = new Set<ModelFamily>(["gpt", "claude", "gemini", "kimi", "minimax", "glm", "codex", "other"]);
   return readStringArray(value).filter((item): item is ModelFamily => valid.has(item as ModelFamily));
+}
+
+function readRoleModelAssignments(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) return {};
+  const result: Record<string, unknown> = {};
+
+  for (const [role, assignment] of Object.entries(value)) {
+    if (typeof assignment === "string") {
+      result[role] = assignment;
+      continue;
+    }
+
+    if (isRecord(assignment) && typeof assignment["model"] === "string") {
+      result[role] = assignment["model"];
+    }
+  }
+
+  return result;
+}
+
+function readEmbeddedReasoningEffortAssignments(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) return {};
+  const result: Record<string, unknown> = {};
+
+  for (const [role, assignment] of Object.entries(value)) {
+    if (isRecord(assignment) && typeof assignment["reasoningEffort"] === "string") {
+      result[role] = assignment["reasoningEffort"];
+    }
+  }
+
+  return result;
+}
+
+function mergeRecordAssignments(...items: unknown[]): Record<string, unknown> {
+  return items.reduce<Record<string, unknown>>((merged, item) => {
+    if (!isRecord(item)) return merged;
+    return { ...merged, ...item };
+  }, {});
 }
 
 function isModelSourceFilter(value: unknown): value is ModelProviderSource | "all" {
@@ -471,13 +530,14 @@ export function createBoundedLitePlugin(
 Actions:
 	- import: Import all available OpenCode model providers by default. Call with { "action": "import" }.
 - list: Show current role model assignments and available provider models. Call with { "action": "list" }.
-- auto: Recommend role and Task Lead profile model assignments from the imported model pool based on capability needs. This does not write config. Call with { "action": "auto" }.
-- apply: Manually assign specific models to roles or profiles. Call with { "action": "apply", "assignments": { "role-name": "provider/model-id" }, "taskLeadProfileAssignments": { "code": "provider/model-id" } }.
+- auto: Show the imported model pool first, then recommend role and Task Lead profile model assignments from that pool based on capability needs. This does not write config. Call with { "action": "auto" }.
+- apply: Manually assign specific models, reasoning effort, or profile models. Call with { "action": "apply", "assignments": { "role-name": "provider/model-id" }, "reasoningEffortAssignments": { "command-lead": "high" }, "taskLeadProfileAssignments": { "code": "provider/model-id" } }.
 
 Policy:
 	- source and providerPreference are optional narrowing filters; by default the imported pool includes every discovered provider.
 - allowCodexBackend defaults to false.
 - familyPreference can limit the imported pool, for example { "familyPreference": ["gpt"] } for GPT-family subscription models.
+- reasoningEffortAssignments supports minimal, low, medium, or high and writes agent.<role>.reasoningEffort for providers/models that support that option.
 
 Role capability summary:
 - command-lead (orchestration): needs strongest reasoning
@@ -500,6 +560,7 @@ Task Lead profile summary:
 
 AI selection rule:
 - Only choose model IDs returned by action=import or the imported pool used by action=auto.
+- For reasoning effort, prefer the JSON returned by action=auto, then let the user adjust low/medium/high per role before applying.
 - After action=auto, ask the user whether they want to modify the recommendations before calling action=apply.
 
 If no provider models are found, tell the user to configure or connect OpenCode providers first.`,
@@ -507,11 +568,14 @@ If no provider models are found, tell the user to configure or connect OpenCode 
           const action = typeof args["action"] === "string" ? args["action"] : "list";
           const config = await readOpenCodeConfig(options.configDir);
           const effectiveConfig = withConfiguredTaskLeadProfiles(config, options);
+          const credentialProviderIds = await readOpenCodeAuthProviderIds();
+          const runtimeModels = await listRuntimeProviderModels(context);
+          const modelsDevModels = await listModelsDevProviderModels(credentialProviderIds);
           const credentialModels = listKnownModelsForCredentialProviders(
-            await readOpenCodeAuthProviderIds(),
+            credentialProviderIds,
           );
           const models = mergeProviderModels(
-            mergeProviderModels(await listRuntimeProviderModels(context), credentialModels),
+            mergeProviderModels(mergeProviderModels(runtimeModels, modelsDevModels), credentialModels),
             listProviderModels(effectiveConfig),
           );
           const inferredPolicy = inferModelPoolPolicy(effectiveConfig, readModelPoolPolicy(args));
@@ -535,13 +599,10 @@ If no provider models are found, tell the user to configure or connect OpenCode 
               return `- ${role.role}: ${role.effectiveModel ?? "<unset>"} (${source})`;
             });
 
-	            const runtimeModels = await listRuntimeProviderModels(context);
 	            const configModels = listProviderModels(effectiveConfig);
-	            const credentialModels = listKnownModelsForCredentialProviders(
-	              await readOpenCodeAuthProviderIds(),
-	            );
 	            const debugLines = [
 	              `Runtime provider models: ${runtimeModels.length > 0 ? runtimeModels.map((m) => m.id).join(", ") : "none"}`,
+	              `Models.dev fallback models: ${modelsDevModels.length > 0 ? modelsDevModels.map((m) => m.id).join(", ") : "none"}`,
 	              `Credential fallback models: ${credentialModels.length > 0 ? credentialModels.map((m) => m.id).join(", ") : "none"}`,
 	              `Config-inferred models: ${configModels.length > 0 ? configModels.map((m) => m.id).join(", ") : "none"}`,
 	            ];
@@ -581,6 +642,7 @@ If no provider models are found, tell the user to configure or connect OpenCode 
           if (action === "auto") {
             const autoResult = resolveAutoModels(importedPool, effectiveConfig);
             const profileAutoResult = resolveAutoTaskLeadProfileModels(importedPool);
+            const reasoningEffortAssignments = resolveAutoReasoningEffortAssignments(autoResult.assignments);
 
             if (importedPool.length === 0 && autoResult.resolved.length === 0 && profileAutoResult.resolved.length === 0) {
               const roleLines = summarizeRoleModels(effectiveConfig).map((role) => {
@@ -588,11 +650,7 @@ If no provider models are found, tell the user to configure or connect OpenCode 
                 return `- ${role.role}: ${role.effectiveModel ?? "<unset>"} (${source})`;
               });
 
-	              const runtimeModels = await listRuntimeProviderModels(context);
 	              const configModels = listProviderModels(effectiveConfig);
-	              const credentialModels = listKnownModelsForCredentialProviders(
-	                await readOpenCodeAuthProviderIds(),
-	              );
 	
 	              const helpLines = [
                 "Oh My Lite OpenAgent auto model configuration",
@@ -608,6 +666,7 @@ If no provider models are found, tell the user to configure or connect OpenCode 
                 "",
 	                "Debug info:",
 	                `  Runtime provider models: ${runtimeModels.length > 0 ? runtimeModels.map((m) => m.id).join(", ") : "none"}`,
+	                `  Models.dev fallback models: ${modelsDevModels.length > 0 ? modelsDevModels.map((m) => m.id).join(", ") : "none"}`,
 	                `  Credential fallback models: ${credentialModels.length > 0 ? credentialModels.map((m) => m.id).join(", ") : "none"}`,
 	                `  Config-inferred models: ${configModels.length > 0 ? configModels.map((m) => m.id).join(", ") : "none"}`,
                 "",
@@ -622,6 +681,12 @@ If no provider models are found, tell the user to configure or connect OpenCode 
             const taskLeadProfileAssignments = profileAutoResult.assignments;
             const reportLines = [
               inferredPolicy.reason,
+              "",
+              "Available imported model pool (review before recommendations):",
+              formatModelImportReport({
+                models: importedPool,
+                policy: poolPolicy,
+              }),
               "",
               formatAutoModelReport(autoResult),
               "",
@@ -639,6 +704,9 @@ If no provider models are found, tell the user to configure or connect OpenCode 
               "Recommended Task Lead profile assignments JSON:",
               JSON.stringify(taskLeadProfileAssignments, null, 2),
               "",
+              "Recommended reasoning effort assignments JSON:",
+              JSON.stringify(reasoningEffortAssignments, null, 2),
+              "",
               "Preview only. Ask the user whether they want to modify these assignments, then call action=apply to write them.",
             ];
 
@@ -648,26 +716,36 @@ If no provider models are found, tell the user to configure or connect OpenCode 
           if (action === "apply") {
             const assignments = args["assignments"];
             const taskLeadProfileAssignments = args["taskLeadProfileAssignments"] ?? args["profileAssignments"];
+            const roleModelAssignments = readRoleModelAssignments(assignments);
+            const reasoningEffortAssignments = mergeRecordAssignments(
+              readEmbeddedReasoningEffortAssignments(assignments),
+              args["reasoningEffortAssignments"] ?? args["reasoningAssignments"],
+            );
 
-            const hasRoleAssignments = typeof assignments === "object" && assignments !== null && !Array.isArray(assignments);
+            const hasRoleAssignments = Object.keys(roleModelAssignments).length > 0;
+            const hasReasoningAssignments = Object.keys(reasoningEffortAssignments).length > 0;
             const hasProfileAssignments = typeof taskLeadProfileAssignments === "object" &&
               taskLeadProfileAssignments !== null &&
               !Array.isArray(taskLeadProfileAssignments);
 
-            if (!hasRoleAssignments && !hasProfileAssignments) {
+            if (!hasRoleAssignments && !hasProfileAssignments && !hasReasoningAssignments) {
               throw new Error(
-                "bounded_lite_model_config apply requires assignments or taskLeadProfileAssignments with provider/model values.",
+                "bounded_lite_model_config apply requires assignments, reasoningEffortAssignments, or taskLeadProfileAssignments.",
               );
             }
 
             const result = hasRoleAssignments ? applyRoleModelConfig(
               config,
-              assignments as Record<string, unknown>,
+              roleModelAssignments,
               importedPool.map((model) => model.id),
               {
                 allowUnavailableModels: args["allowUnavailableModels"] === true,
               },
             ) : { changed: [], skipped: [], warnings: [] };
+            const reasoningResult = hasReasoningAssignments ? applyRoleReasoningEffortConfig(
+              config,
+              reasoningEffortAssignments,
+            ) : { changed: [], skipped: [] };
             const profileConfig = withConfiguredTaskLeadProfiles(config, options);
             const profileResult = hasProfileAssignments ? applyTaskLeadProfileModelConfig(
               profileConfig,
@@ -702,6 +780,8 @@ If no provider models are found, tell the user to configure or connect OpenCode 
                 profileChanged: profileResult.changed,
                 profileSkipped: profileResult.skipped,
                 profileWarnings: profileResult.warnings,
+                reasoningChanged: reasoningResult.changed,
+                reasoningSkipped: reasoningResult.skipped,
               }),
               "",
               `Updated ${configPath}. Restart OpenCode or start a new session if the active TUI keeps old model state.`,
@@ -713,11 +793,6 @@ If no provider models are found, tell the user to configure or connect OpenCode 
       },
     },
     "permission.ask"(input, output) {
-      if (input.tool === "bounded_lite_model_config" || input.tool === "bounded_lite_plan_artifact") {
-        output.status = "ask";
-        return;
-      }
-
       if (input.tool.startsWith("bounded_lite_")) {
         output.status = "allow";
       }
