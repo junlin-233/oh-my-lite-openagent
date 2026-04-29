@@ -84,11 +84,98 @@ describe("delegation boundaries", () => {
 
     expect(Object.keys(bash)[0]).toBe("*");
     expect(bash["*"]).toBe("ask");
-    expect(bash["git status --short"]).toBe("allow");
+    expect(bash["git status"]).toBe("allow");
+    expect(bash["git status *"]).toBe("allow");
     expect(bash["git diff"]).toBe("allow");
+    expect(bash["git diff *"]).toBe("allow");
     expect(bash["npm test"]).toBe("allow");
+    expect(bash["npm test *"]).toBe("allow");
     expect(bash["npm run typecheck"]).toBe("allow");
+    expect(bash["npm run typecheck *"]).toBe("allow");
     expect(bash["node scripts/install.mjs --dry-run"]).toBe("allow");
+    expect(bash["node scripts/install.mjs --dry-run *"]).toBe("allow");
+  });
+
+  it("denies dangerous pipe operations in bash with correct rule ordering", () => {
+    const bash = config.permission?.bash;
+    expect(typeof bash).toBe("object");
+    if (typeof bash !== "object" || bash === null) return;
+
+    // Verify deny rules exist
+    expect(bash["curl * | *"]).toBe("deny");
+    expect(bash["wget * | *"]).toBe("deny");
+    expect(bash["bash <(curl *)"]).toBe("deny");
+    expect(bash["bash <(wget *)"]).toBe("deny");
+    expect(bash["eval \"$(curl *)\""]).toBe("deny");
+    expect(bash["eval \"$(wget *)\""]).toBe("deny");
+
+    // Verify deny rules come AFTER allow rules (last match wins)
+    const bashKeys = Object.keys(bash);
+    const curlAllowIndex = bashKeys.indexOf("curl *");
+    const curlDenyIndex = bashKeys.indexOf("curl * | *");
+    const wgetAllowIndex = bashKeys.indexOf("wget *");
+    const wgetDenyIndex = bashKeys.indexOf("wget * | *");
+
+    expect(curlDenyIndex).toBeGreaterThan(curlAllowIndex);
+    expect(wgetDenyIndex).toBeGreaterThan(wgetAllowIndex);
+  });
+
+  it("asks for dangerous git and npm operations", () => {
+    const bash = config.permission?.bash;
+    expect(typeof bash).toBe("object");
+    if (typeof bash !== "object" || bash === null) return;
+
+    expect(bash["git push"]).toBe("ask");
+    expect(bash["git push *"]).toBe("ask");
+    expect(bash["git commit"]).toBe("ask");
+    expect(bash["git commit *"]).toBe("ask");
+    expect(bash["git reset"]).toBe("ask");
+    expect(bash["git reset *"]).toBe("ask");
+    expect(bash["npm uninstall"]).toBe("ask");
+    expect(bash["npm uninstall *"]).toBe("ask");
+    expect(bash["npm publish"]).toBe("ask");
+    expect(bash["npm publish *"]).toBe("ask");
+  });
+
+  it("asks for system privilege operations", () => {
+    const bash = config.permission?.bash;
+    expect(typeof bash).toBe("object");
+    if (typeof bash !== "object" || bash === null) return;
+
+    expect(bash["sudo"]).toBe("ask");
+    expect(bash["sudo *"]).toBe("ask");
+    expect(bash["chmod"]).toBe("ask");
+    expect(bash["chmod *"]).toBe("ask");
+    expect(bash["chown"]).toBe("ask");
+    expect(bash["chown *"]).toBe("ask");
+  });
+
+  it("allows normal file edits but protects sensitive files", () => {
+    const edit = config.permission?.edit;
+    expect(typeof edit).toBe("object");
+    if (typeof edit !== "object" || edit === null) return;
+
+    // Verify * is first (last match wins)
+    expect(Object.keys(edit)[0]).toBe("*");
+    expect(edit["*"]).toBe("allow");
+    expect(edit["*.env"]).toBe("ask");
+    expect(edit["**/*.key"]).toBe("ask");
+    expect(edit["**/*.pem"]).toBe("ask");
+    expect(edit["**/opencode.json"]).toBe("ask");
+    expect(edit["**/package.json"]).toBe("ask");
+  });
+
+  it("denies lock file modifications", () => {
+    const edit = config.permission?.edit;
+    expect(typeof edit).toBe("object");
+    if (typeof edit !== "object" || edit === null) return;
+
+    expect(edit["**/package-lock.json"]).toBe("deny");
+    expect(edit["**/yarn.lock"]).toBe("deny");
+    expect(edit["**/pnpm-lock.yaml"]).toBe("deny");
+    expect(edit["**/Cargo.lock"]).toBe("deny");
+    expect(edit["**/poetry.lock"]).toBe("deny");
+    expect(edit["**/composer.lock"]).toBe("deny");
   });
 
   it("keeps Task Lead non-interactive by allowing edits and denying non-whitelisted bash", () => {
