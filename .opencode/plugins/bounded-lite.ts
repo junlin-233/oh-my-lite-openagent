@@ -13,6 +13,7 @@ import {
   applyRoleModelConfig,
   applyRoleReasoningEffortConfig,
   applyTaskLeadProfileModelConfig,
+  buildDiscoveredModelPool,
   formatAutoModelReport,
   formatModelImportReport,
   formatModelConfigReport,
@@ -36,6 +37,7 @@ import {
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { isKnownTaskLeadProfile } from "../lib/runtime/task-lead-profiles.js";
 
 const PLUGIN_FILE = "bounded-lite.ts";
 
@@ -76,7 +78,7 @@ export function normalizePluginOptions(
     ...(typeof options.taskLeadProfiles === "object" &&
         options.taskLeadProfiles !== null &&
         !Array.isArray(options.taskLeadProfiles)
-      ? { taskLeadProfiles: options.taskLeadProfiles }
+      ? { taskLeadProfiles: normalizeTaskLeadProfilesConfig(options.taskLeadProfiles) }
       : {}),
   };
 }
@@ -157,9 +159,9 @@ function configuredTaskLeadProfiles(
   options: NormalizedBoundedLitePluginOptions,
 ): Record<string, unknown> {
   const pluginOptions = readBoundedLitePluginOptions(config);
-  if (isRecord(pluginOptions["taskLeadProfiles"])) return pluginOptions["taskLeadProfiles"];
-  if (isRecord(options.taskLeadProfiles)) return options.taskLeadProfiles;
-  return isRecord(config["taskLeadProfiles"]) ? config["taskLeadProfiles"] : {};
+  if (isRecord(pluginOptions["taskLeadProfiles"])) return normalizeTaskLeadProfilesConfig(pluginOptions["taskLeadProfiles"]);
+  if (isRecord(options.taskLeadProfiles)) return normalizeTaskLeadProfilesConfig(options.taskLeadProfiles);
+  return isRecord(config["taskLeadProfiles"]) ? normalizeTaskLeadProfilesConfig(config["taskLeadProfiles"]) : {};
 }
 
 function withConfiguredTaskLeadProfiles(
@@ -207,9 +209,38 @@ function writeTaskLeadProfilesToPluginOptions(
 ): void {
   updateBoundedLitePluginOptions(config, (pluginOptions) => ({
     ...pluginOptions,
-    taskLeadProfiles,
+    taskLeadProfiles: normalizeTaskLeadProfilesConfig(taskLeadProfiles),
   }));
   delete config["taskLeadProfiles"];
+}
+
+function normalizeTaskLeadProfilesConfig(
+  taskLeadProfiles: Record<string, unknown>,
+): Record<string, unknown> {
+  const normalized: Record<string, unknown> = {};
+
+  for (const [profileName, rawProfile] of Object.entries(taskLeadProfiles)) {
+    if (!isKnownTaskLeadProfile(profileName)) continue;
+
+    if (typeof rawProfile === "string" && rawProfile.trim() !== "") {
+      normalized[profileName] = { model: rawProfile.trim() };
+      continue;
+    }
+
+    if (!isRecord(rawProfile)) continue;
+
+    const model = readString(rawProfile["model"]);
+    const fallbackModels = readStringArray(rawProfile["fallbackModels"]);
+    const attributes = readStringArray(rawProfile["attributes"]);
+
+    normalized[profileName] = {
+      ...(model ? { model } : {}),
+      ...(fallbackModels.length > 0 ? { fallbackModels } : {}),
+      ...(attributes.length > 0 ? { attributes } : {}),
+    };
+  }
+
+  return normalized;
 }
 
 function taskLeadProfilesToDispatch(
@@ -335,20 +366,21 @@ async function listModelsDevProviderModels(providerIds: readonly string[]): Prom
   }
 }
 
-function readModelPoolPolicy(args: Record<string, unknown>): ModelPoolPolicy {
-  const policy = isRecord(args["policy"]) ? args["policy"] : {};
+function readModelPoolPolicy(args: unknown): ModelPoolPolicy {
+  const request = isRecord(args) ? args : {};
+  const policy = isRecord(request["policy"]) ? request["policy"] : {};
   const sourceValue = typeof policy["source"] === "string"
     ? policy["source"]
-    : typeof args["source"] === "string"
-      ? args["source"]
+    : typeof request["source"] === "string"
+      ? request["source"]
       : undefined;
   const source = isModelSourceFilter(sourceValue) ? sourceValue : undefined;
-  const providerPreference = readStringArray(policy["providerPreference"] ?? args["providerPreference"]);
-  const familyPreference = readFamilyArray(policy["familyPreference"] ?? args["familyPreference"]);
+  const providerPreference = readStringArray(policy["providerPreference"] ?? request["providerPreference"]);
+  const familyPreference = readFamilyArray(policy["familyPreference"] ?? request["familyPreference"]);
   const allowCodexBackend = typeof policy["allowCodexBackend"] === "boolean"
     ? policy["allowCodexBackend"]
-    : typeof args["allowCodexBackend"] === "boolean"
-      ? args["allowCodexBackend"]
+    : typeof request["allowCodexBackend"] === "boolean"
+      ? request["allowCodexBackend"]
       : undefined;
 
   return {
@@ -410,6 +442,151 @@ function isModelSourceFilter(value: unknown): value is ModelProviderSource | "al
     value === "unknown" ||
     value === "all"
   );
+}
+
+type ModelConfigAction = "import" | "list" | "auto" | "apply";
+
+interface ModelConfigRequest {
+  action: ModelConfigAction;
+  assignments?: Record<string, unknown>;
+  reasoningEffortAssignments?: Record<string, unknown>;
+  taskLeadProfileAssignments?: Record<string, unknown>;
+  policy?: Record<string, unknown>;
+  source?: string;
+  providerPreference?: string[];
+  familyPreference?: string[];
+  allowCodexBackend?: boolean;
+}
+
+interface ModelConfigValidationError {
+  field: string;
+  code: string;
+  message: string;
+}
+
+interface ModelConfigResponse {
+  ok: boolean;
+  action: ModelConfigAction;
+  applied: boolean;
+  changed_keys: string[];
+  validation_errors?: ModelConfigValidationError[];
+  warnings?: string[];
+  available_models?: Array<{ id: string; provider?: string; label?: string }>;
+  role_assignments?: Record<string, string>;
+  profile_assignments?: Record<string, string>;
+  reasoning_effort_assignments?: Record<string, "minimal" | "low" | "medium" | "high">;
+  recommendations?: {
+    roles?: Record<string, string>;
+    taskLeadProfiles?: Record<string, string>;
+    reasoningEffort?: Record<string, "minimal" | "low" | "medium" | "high">;
+  };
+  report?: string;
+}
+
+function inferModelConfigAction(payload: unknown): ModelConfigAction {
+  if (!isRecord(payload)) return "list";
+  const action = payload["action"];
+  if (action === "import" || action === "list" || action === "auto" || action === "apply") {
+    return action;
+  }
+  return "list";
+}
+
+function toAvailableModels(models: ReturnType<typeof importModelPool>): Array<{ id: string; provider?: string; label?: string }> {
+  return models.map((model) => ({
+    id: model.id,
+    ...(model.provider ? { provider: model.provider } : {}),
+    ...(model.name ? { label: model.name } : {}),
+  }));
+}
+
+function collectChangedKeys(input: {
+  roleChanged: Array<{ role: string }>;
+  profileChanged: Array<{ profile: string }>;
+  reasoningChanged: Array<{ role: string }>;
+}): string[] {
+  return [
+    ...input.roleChanged.map((item) => `assignments.${item.role}`),
+    ...input.profileChanged.map((item) => `taskLeadProfileAssignments.${item.profile}`),
+    ...input.reasoningChanged.map((item) => `reasoningEffortAssignments.${item.role}`),
+  ];
+}
+
+function parseModelConfigError(error: unknown, action: ModelConfigAction): ModelConfigResponse {
+  const message = error instanceof Error ? error.message : String(error);
+  const match = message.match(/^(MODELCFG_ERR_[A-Z_]+):\s*(.*)$/);
+  if (!match) throw error;
+
+  const code = match[1] ?? "MODELCFG_ERR_INVALID_PAYLOAD";
+  const details = match[2] ?? message;
+  const field = code === "MODELCFG_ERR_MISSING_ACTION" || code === "MODELCFG_ERR_UNKNOWN_ACTION"
+    ? "action"
+    : code === "MODELCFG_ERR_UNKNOWN_FIELD"
+      ? "payload"
+      : "request";
+
+  return {
+    ok: false,
+    action,
+    applied: false,
+    changed_keys: [],
+    validation_errors: [{ field, code, message: details }],
+  };
+}
+
+function parseModelConfigRequest(payload: unknown): ModelConfigRequest {
+  if (!isRecord(payload)) {
+    throw new Error("MODELCFG_ERR_INVALID_PAYLOAD: bounded_lite_model_config payload must be an object.");
+  }
+
+  const allowedFields = new Set([
+    "action",
+    "assignments",
+    "reasoningEffortAssignments",
+    "taskLeadProfileAssignments",
+    "policy",
+    "source",
+    "providerPreference",
+    "familyPreference",
+    "allowCodexBackend",
+  ]);
+
+  for (const key of Object.keys(payload)) {
+    if (!allowedFields.has(key)) {
+      throw new Error(`MODELCFG_ERR_UNKNOWN_FIELD: unknown field \"${key}\".`);
+    }
+  }
+
+  if (typeof payload["action"] !== "string" || payload["action"].trim() === "") {
+    throw new Error("MODELCFG_ERR_MISSING_ACTION: bounded_lite_model_config requires action.");
+  }
+
+  const action = payload["action"];
+  if (action !== "import" && action !== "list" && action !== "auto" && action !== "apply") {
+    throw new Error("MODELCFG_ERR_UNKNOWN_ACTION: action must be import, list, auto, or apply.");
+  }
+
+  return {
+    action,
+    ...(isRecord(payload["assignments"]) ? { assignments: payload["assignments"] } : {}),
+    ...(isRecord(payload["reasoningEffortAssignments"])
+      ? { reasoningEffortAssignments: payload["reasoningEffortAssignments"] }
+      : {}),
+    ...(isRecord(payload["taskLeadProfileAssignments"])
+      ? { taskLeadProfileAssignments: payload["taskLeadProfileAssignments"] }
+      : {}),
+    ...(isRecord(payload["policy"]) ? { policy: payload["policy"] } : {}),
+    ...(typeof payload["source"] === "string" ? { source: payload["source"] } : {}),
+    ...(Array.isArray(payload["providerPreference"])
+      ? { providerPreference: readStringArray(payload["providerPreference"]) }
+      : {}),
+    ...(Array.isArray(payload["familyPreference"])
+      ? { familyPreference: readStringArray(payload["familyPreference"]) }
+      : {}),
+    ...(typeof payload["allowCodexBackend"] === "boolean"
+      ? { allowCodexBackend: payload["allowCodexBackend"] }
+      : {}),
+  };
 }
 
 export function createBoundedLitePlugin(
@@ -564,231 +741,330 @@ AI selection rule:
 - After action=auto, ask the user whether they want to modify the recommendations before calling action=apply.
 
 If no provider models are found, tell the user to configure or connect OpenCode providers first.`,
+        args: {
+          type: "object",
+          additionalProperties: false,
+          required: ["action"],
+          properties: {
+            action: {
+              type: "string",
+              enum: ["import", "list", "auto", "apply"],
+            },
+            assignments: {
+              type: "object",
+              additionalProperties: { type: "string" },
+            },
+            reasoningEffortAssignments: {
+              type: "object",
+              additionalProperties: {
+                type: "string",
+                enum: ["minimal", "low", "medium", "high"],
+              },
+            },
+            taskLeadProfileAssignments: {
+              type: "object",
+              additionalProperties: { type: "string" },
+            },
+            policy: {
+              type: "object",
+              additionalProperties: true,
+            },
+            source: {
+              type: "string",
+              enum: ["all", "opencode-subscription", "api-provider", "gateway", "unknown"],
+            },
+            providerPreference: {
+              type: "array",
+              items: { type: "string" },
+            },
+            familyPreference: {
+              type: "array",
+              items: { type: "string" },
+            },
+            allowCodexBackend: {
+              type: "boolean",
+            },
+          },
+        },
         async execute(args, context) {
-          const action = typeof args["action"] === "string" ? args["action"] : "list";
-          const config = await readOpenCodeConfig(options.configDir);
-          const effectiveConfig = withConfiguredTaskLeadProfiles(config, options);
-          const credentialProviderIds = await readOpenCodeAuthProviderIds();
-          const runtimeModels = await listRuntimeProviderModels(context);
-          const modelsDevModels = await listModelsDevProviderModels(credentialProviderIds);
-          const credentialModels = listKnownModelsForCredentialProviders(
-            credentialProviderIds,
-          );
-          const models = mergeProviderModels(
-            mergeProviderModels(mergeProviderModels(runtimeModels, modelsDevModels), credentialModels),
-            listProviderModels(effectiveConfig),
-          );
-          const inferredPolicy = inferModelPoolPolicy(effectiveConfig, readModelPoolPolicy(args));
-          const poolPolicy = inferredPolicy.policy;
-          const importedPool = importModelPool(models, poolPolicy);
+          const fallbackAction = inferModelConfigAction(args);
 
-          if (action === "import") {
-            return [
-              inferredPolicy.reason,
-              "",
-              formatModelImportReport({
-                models: importedPool,
-                policy: poolPolicy,
-              }),
-            ].join("\n");
-          }
-
-          if (action === "list") {
-            const roleLines = summarizeRoleModels(effectiveConfig).map((role) => {
-              const source = role.inheritsGlobal ? "inherits global" : "configured";
-              return `- ${role.role}: ${role.effectiveModel ?? "<unset>"} (${source})`;
+          try {
+            const request = parseModelConfigRequest(args);
+            const action = request.action;
+            const config = await readOpenCodeConfig(options.configDir);
+            const effectiveConfig = withConfiguredTaskLeadProfiles(config, options);
+            const credentialProviderIds = await readOpenCodeAuthProviderIds();
+            const runtimeModels = await listRuntimeProviderModels(context);
+            const modelsDevModels = await listModelsDevProviderModels(credentialProviderIds);
+            const credentialModels = listKnownModelsForCredentialProviders(
+              credentialProviderIds,
+            );
+            const configModels = listProviderModels(effectiveConfig);
+            const discoveredPool = buildDiscoveredModelPool({
+              runtimeModels,
+              connectedProviderIds: credentialProviderIds,
+              modelsDevModels,
+              credentialFallbackModels: credentialModels,
+              configuredModels: configModels,
             });
+            const models = discoveredPool.models;
+            const inferredPolicy = inferModelPoolPolicy(effectiveConfig, readModelPoolPolicy(request));
+            const poolPolicy = inferredPolicy.policy;
+            const importedPool = importModelPool(models, poolPolicy);
 
-	            const configModels = listProviderModels(effectiveConfig);
-	            const debugLines = [
-	              `Runtime provider models: ${runtimeModels.length > 0 ? runtimeModels.map((m) => m.id).join(", ") : "none"}`,
-	              `Models.dev fallback models: ${modelsDevModels.length > 0 ? modelsDevModels.map((m) => m.id).join(", ") : "none"}`,
-	              `Credential fallback models: ${credentialModels.length > 0 ? credentialModels.map((m) => m.id).join(", ") : "none"}`,
-	              `Config-inferred models: ${configModels.length > 0 ? configModels.map((m) => m.id).join(", ") : "none"}`,
-	            ];
-
-            if (models.length === 0) {
-              return [
-                "Oh My Lite OpenAgent role model configuration",
-                "",
-                "Current role models:",
-                ...roleLines,
-                "",
-                "Available provider models:",
-                "- <none found>",
-                "",
-                "Debug info:",
-                ...debugLines,
-                "",
-                "No provider models were detected from either runtime or config.",
-                "This usually means your OpenCode provider configuration is stored",
-                "in the internal credential store (via /connect) rather than in",
-                "opencode.json's \"provider\" key.",
-                "",
-                "Since you already have models assigned to roles above, you can:",
-                "1. Use action=import to inspect the eligible inferred model pool.",
-                "2. Use action=apply only with model IDs returned by action=import.",
-                '   { "action": "apply", "assignments": { "command-lead": "provider/model" } }',
-              ].join("\n");
+            if (action === "import") {
+              return {
+                ok: true,
+                action,
+                applied: false,
+                changed_keys: [],
+                available_models: toAvailableModels(importedPool),
+                report: [
+                  inferredPolicy.reason,
+                  "",
+                  formatModelImportReport({
+                    models: importedPool,
+                    policy: poolPolicy,
+                  }),
+                ].join("\n"),
+              } satisfies ModelConfigResponse;
             }
 
-            return formatModelConfigReport({
-              roles: summarizeRoleModels(effectiveConfig),
-              taskLeadProfiles: summarizeTaskLeadProfileModels(effectiveConfig),
-              models,
-            });
-          }
+            if (action === "list") {
+              const roleSummaries = summarizeRoleModels(effectiveConfig);
+              const profileSummaries = summarizeTaskLeadProfileModels(effectiveConfig);
+              const roleAssignments = Object.fromEntries(
+                roleSummaries
+                  .filter((role) => typeof role.effectiveModel === "string")
+                  .map((role) => [role.role, role.effectiveModel as string]),
+              );
+              const profileAssignments = Object.fromEntries(
+                profileSummaries
+                  .filter((profile) => typeof profile.effectiveModel === "string")
+                  .map((profile) => [profile.profile, profile.effectiveModel as string]),
+              );
 
-          if (action === "auto") {
-            const autoResult = resolveAutoModels(importedPool, effectiveConfig);
-            const profileAutoResult = resolveAutoTaskLeadProfileModels(importedPool);
-            const reasoningEffortAssignments = resolveAutoReasoningEffortAssignments(autoResult.assignments);
+              const report = models.length === 0
+                ? [
+                  "Oh My Lite OpenAgent role model configuration",
+                  "",
+                  "Current role models:",
+                  ...roleSummaries.map((role) => {
+                    const source = role.inheritsGlobal ? "inherits global" : "configured";
+                    return `- ${role.role}: ${role.effectiveModel ?? "<unset>"} (${source})`;
+                  }),
+                  "",
+                  "Available provider models:",
+                  "- <none found>",
+                  "",
+                  "No provider models were detected from either runtime or config.",
+                ].join("\n")
+                : formatModelConfigReport({
+                  roles: roleSummaries,
+                  taskLeadProfiles: profileSummaries,
+                  models,
+                });
 
-            if (importedPool.length === 0 && autoResult.resolved.length === 0 && profileAutoResult.resolved.length === 0) {
-              const roleLines = summarizeRoleModels(effectiveConfig).map((role) => {
-                const source = role.inheritsGlobal ? "inherits global" : "configured";
-                return `- ${role.role}: ${role.effectiveModel ?? "<unset>"} (${source})`;
+              return {
+                ok: true,
+                action,
+                applied: false,
+                changed_keys: [],
+                available_models: toAvailableModels(models),
+                role_assignments: roleAssignments,
+                profile_assignments: profileAssignments,
+                report,
+              } satisfies ModelConfigResponse;
+            }
+
+            if (action === "auto") {
+              const autoResult = resolveAutoModels(importedPool, effectiveConfig);
+              const profileAutoResult = resolveAutoTaskLeadProfileModels(importedPool);
+              const reasoningEffortAssignments = resolveAutoReasoningEffortAssignments(autoResult.assignments);
+
+              const report = importedPool.length === 0 && autoResult.resolved.length === 0 && profileAutoResult.resolved.length === 0
+                ? [
+                  "Oh My Lite OpenAgent auto model configuration",
+                  "",
+                  "No imported models found to recommend.",
+                  "",
+                  inferredPolicy.reason,
+                  "",
+                  formatModelImportReport({ models: importedPool, policy: poolPolicy }),
+                ].join("\n")
+                : [
+                  "Oh My Lite OpenAgent /agent-models one-stop discovery and recommendation",
+                  "",
+                  inferredPolicy.reason,
+                  "",
+                  "Available imported model pool (review before recommendations):",
+                  formatModelImportReport({ models: importedPool, policy: poolPolicy }),
+                  "",
+                  formatAutoModelReport(autoResult),
+                  "",
+                  formatTaskLeadProfileModelReport(profileAutoResult),
+                ].join("\n");
+
+              return {
+                ok: true,
+                action,
+                applied: false,
+                changed_keys: [],
+                available_models: toAvailableModels(importedPool),
+                recommendations: {
+                  roles: autoResult.assignments,
+                  taskLeadProfiles: profileAutoResult.assignments,
+                  reasoningEffort: reasoningEffortAssignments,
+                },
+                role_assignments: autoResult.assignments,
+                profile_assignments: profileAutoResult.assignments,
+                reasoning_effort_assignments: reasoningEffortAssignments,
+                report,
+              } satisfies ModelConfigResponse;
+            }
+
+            if (action === "apply") {
+              const assignments = request.assignments;
+              const taskLeadProfileAssignments = request.taskLeadProfileAssignments;
+              const roleModelAssignments = readRoleModelAssignments(assignments);
+              const reasoningEffortAssignments = mergeRecordAssignments(
+                readEmbeddedReasoningEffortAssignments(assignments),
+                request.reasoningEffortAssignments,
+              );
+
+              const hasRoleAssignments = Object.keys(roleModelAssignments).length > 0;
+              const hasReasoningAssignments = Object.keys(reasoningEffortAssignments).length > 0;
+              const hasProfileAssignments = typeof taskLeadProfileAssignments === "object" &&
+                taskLeadProfileAssignments !== null &&
+                !Array.isArray(taskLeadProfileAssignments);
+
+              if (!hasRoleAssignments && !hasProfileAssignments && !hasReasoningAssignments) {
+                return {
+                  ok: false,
+                  action,
+                  applied: false,
+                  changed_keys: [],
+                  validation_errors: [{
+                    field: "apply",
+                    code: "MODELCFG_ERR_INVALID_PAYLOAD",
+                    message: "bounded_lite_model_config apply requires assignments, reasoningEffortAssignments, or taskLeadProfileAssignments.",
+                  }],
+                } satisfies ModelConfigResponse;
+              }
+
+              const hasAnyDiscoveredPoolSource =
+                importedPool.length > 0 ||
+                models.length > 0 ||
+                runtimeModels.length > 0 ||
+                modelsDevModels.length > 0 ||
+                credentialModels.length > 0 ||
+                configModels.length > 0;
+
+              if ((hasRoleAssignments || hasProfileAssignments) && !hasAnyDiscoveredPoolSource) {
+                return {
+                  ok: false,
+                  action,
+                  applied: false,
+                  changed_keys: [],
+                  validation_errors: [{
+                    field: "apply",
+                    code: "MODELCFG_ERR_POOL_UNAVAILABLE",
+                    message: "unable to build a model pool for apply.",
+                  }],
+                } satisfies ModelConfigResponse;
+              }
+
+              const result = hasRoleAssignments ? applyRoleModelConfig(
+                config,
+                roleModelAssignments,
+                importedPool.map((model) => model.id),
+                { allowUnavailableModels: true },
+              ) : { changed: [], skipped: [], warnings: [] };
+              const reasoningResult = hasReasoningAssignments ? applyRoleReasoningEffortConfig(
+                config,
+                reasoningEffortAssignments,
+              ) : { changed: [], skipped: [] };
+              const profileConfig = withConfiguredTaskLeadProfiles(config, options);
+              const profileResult = hasProfileAssignments ? applyTaskLeadProfileModelConfig(
+                profileConfig,
+                taskLeadProfileAssignments as Record<string, unknown>,
+                importedPool.map((model) => model.id),
+                { allowUnavailableModels: true },
+              ) : { changed: [], skipped: [], warnings: [] };
+              if (hasProfileAssignments || isRecord(config["taskLeadProfiles"])) {
+                const profiles = isRecord(profileConfig["taskLeadProfiles"])
+                  ? profileConfig["taskLeadProfiles"]
+                  : {};
+                writeTaskLeadProfilesToPluginOptions(config, profiles);
+              }
+              const updatedEffectiveConfig = withConfiguredTaskLeadProfiles(config, {
+                ...options,
+                taskLeadProfiles: isRecord(profileConfig["taskLeadProfiles"])
+                  ? profileConfig["taskLeadProfiles"]
+                  : {},
+              });
+              const configPath = await writeOpenCodeConfig(config, options.configDir);
+              const changedKeys = collectChangedKeys({
+                roleChanged: result.changed,
+                profileChanged: profileResult.changed,
+                reasoningChanged: reasoningResult.changed,
               });
 
-	              const configModels = listProviderModels(effectiveConfig);
-	
-	              const helpLines = [
-                "Oh My Lite OpenAgent auto model configuration",
-                "",
-                "No imported models found to recommend.",
-                "",
-                inferredPolicy.reason,
-                "",
-                formatModelImportReport({ models: importedPool, policy: poolPolicy }),
-                "",
-                "Current role models:",
-                ...roleLines,
-                "",
-	                "Debug info:",
-	                `  Runtime provider models: ${runtimeModels.length > 0 ? runtimeModels.map((m) => m.id).join(", ") : "none"}`,
-	                `  Models.dev fallback models: ${modelsDevModels.length > 0 ? modelsDevModels.map((m) => m.id).join(", ") : "none"}`,
-	                `  Credential fallback models: ${credentialModels.length > 0 ? credentialModels.map((m) => m.id).join(", ") : "none"}`,
-	                `  Config-inferred models: ${configModels.length > 0 ? configModels.map((m) => m.id).join(", ") : "none"}`,
-                "",
-                "Use action=import first to inspect the available pool.",
-                "The default pool includes every discovered provider unless policy overrides are provided.",
+              const warnings = [
+                ...result.warnings.map((item) => `${item.role}: ${item.warning}`),
+                ...profileResult.warnings.map((item) => `${item.profile}: ${item.warning}`),
+                ...result.skipped.map((item) => `${item.role}: ${item.reason}`),
+                ...profileResult.skipped.map((item) => `${item.profile}: ${item.reason}`),
+                ...reasoningResult.skipped.map((item) => `${item.role}: ${item.reason}`),
               ];
 
-              return helpLines.join("\n");
+              return {
+                ok: true,
+                action,
+                applied: changedKeys.length > 0,
+                changed_keys: changedKeys,
+                ...(warnings.length > 0 ? { warnings } : {}),
+                available_models: toAvailableModels(importedPool),
+                role_assignments: Object.fromEntries(
+                  summarizeRoleModels(updatedEffectiveConfig)
+                    .filter((role) => typeof role.effectiveModel === "string")
+                    .map((role) => [role.role, role.effectiveModel as string]),
+                ),
+                profile_assignments: Object.fromEntries(
+                  summarizeTaskLeadProfileModels(updatedEffectiveConfig)
+                    .filter((profile) => typeof profile.effectiveModel === "string")
+                    .map((profile) => [profile.profile, profile.effectiveModel as string]),
+                ),
+                reasoning_effort_assignments: Object.fromEntries(
+                  summarizeRoleModels(updatedEffectiveConfig)
+                    .filter((role) => typeof role.configuredReasoningEffort === "string")
+                    .map((role) => [role.role, role.configuredReasoningEffort as "minimal" | "low" | "medium" | "high"]),
+                ),
+                report: [
+                  formatModelConfigReport({
+                    roles: summarizeRoleModels(updatedEffectiveConfig),
+                    taskLeadProfiles: summarizeTaskLeadProfileModels(updatedEffectiveConfig),
+                    models: importedPool,
+                    changed: result.changed,
+                    skipped: result.skipped,
+                    warnings: result.warnings,
+                    profileChanged: profileResult.changed,
+                    profileSkipped: profileResult.skipped,
+                    profileWarnings: profileResult.warnings,
+                    reasoningChanged: reasoningResult.changed,
+                    reasoningSkipped: reasoningResult.skipped,
+                  }),
+                  "",
+                  `Updated ${configPath}. Restart OpenCode or start a new session if the active TUI keeps old model state.`,
+                ].join("\n"),
+              } satisfies ModelConfigResponse;
             }
 
-            const assignments = autoResult.assignments;
-            const taskLeadProfileAssignments = profileAutoResult.assignments;
-            const reportLines = [
-              inferredPolicy.reason,
-              "",
-              "Available imported model pool (review before recommendations):",
-              formatModelImportReport({
-                models: importedPool,
-                policy: poolPolicy,
-              }),
-              "",
-              formatAutoModelReport(autoResult),
-              "",
-              formatTaskLeadProfileModelReport(profileAutoResult),
-              "",
-              formatModelConfigReport({
-                roles: summarizeRoleModels(effectiveConfig),
-                taskLeadProfiles: summarizeTaskLeadProfileModels(effectiveConfig),
-                models: importedPool,
-              }),
-              "",
-              "Recommended assignments JSON:",
-              JSON.stringify(assignments, null, 2),
-              "",
-              "Recommended Task Lead profile assignments JSON:",
-              JSON.stringify(taskLeadProfileAssignments, null, 2),
-              "",
-              "Recommended reasoning effort assignments JSON:",
-              JSON.stringify(reasoningEffortAssignments, null, 2),
-              "",
-              "Preview only. Ask the user whether they want to modify these assignments, then call action=apply to write them.",
-            ];
-
-            return reportLines.join("\n");
+            throw new Error("MODELCFG_ERR_UNKNOWN_ACTION: action must be import, list, auto, or apply.");
+          } catch (error) {
+            return parseModelConfigError(error, fallbackAction);
           }
-
-          if (action === "apply") {
-            const assignments = args["assignments"];
-            const taskLeadProfileAssignments = args["taskLeadProfileAssignments"] ?? args["profileAssignments"];
-            const roleModelAssignments = readRoleModelAssignments(assignments);
-            const reasoningEffortAssignments = mergeRecordAssignments(
-              readEmbeddedReasoningEffortAssignments(assignments),
-              args["reasoningEffortAssignments"] ?? args["reasoningAssignments"],
-            );
-
-            const hasRoleAssignments = Object.keys(roleModelAssignments).length > 0;
-            const hasReasoningAssignments = Object.keys(reasoningEffortAssignments).length > 0;
-            const hasProfileAssignments = typeof taskLeadProfileAssignments === "object" &&
-              taskLeadProfileAssignments !== null &&
-              !Array.isArray(taskLeadProfileAssignments);
-
-            if (!hasRoleAssignments && !hasProfileAssignments && !hasReasoningAssignments) {
-              throw new Error(
-                "bounded_lite_model_config apply requires assignments, reasoningEffortAssignments, or taskLeadProfileAssignments.",
-              );
-            }
-
-            const result = hasRoleAssignments ? applyRoleModelConfig(
-              config,
-              roleModelAssignments,
-              importedPool.map((model) => model.id),
-              {
-                allowUnavailableModels: args["allowUnavailableModels"] === true,
-              },
-            ) : { changed: [], skipped: [], warnings: [] };
-            const reasoningResult = hasReasoningAssignments ? applyRoleReasoningEffortConfig(
-              config,
-              reasoningEffortAssignments,
-            ) : { changed: [], skipped: [] };
-            const profileConfig = withConfiguredTaskLeadProfiles(config, options);
-            const profileResult = hasProfileAssignments ? applyTaskLeadProfileModelConfig(
-              profileConfig,
-              taskLeadProfileAssignments as Record<string, unknown>,
-              importedPool.map((model) => model.id),
-              {
-                allowUnavailableModels: args["allowUnavailableModels"] === true,
-              },
-            ) : { changed: [], skipped: [], warnings: [] };
-            if (hasProfileAssignments || isRecord(config["taskLeadProfiles"])) {
-              const profiles = isRecord(profileConfig["taskLeadProfiles"])
-                ? profileConfig["taskLeadProfiles"]
-                : {};
-              writeTaskLeadProfilesToPluginOptions(config, profiles);
-            }
-            const updatedEffectiveConfig = withConfiguredTaskLeadProfiles(config, {
-              ...options,
-              taskLeadProfiles: isRecord(profileConfig["taskLeadProfiles"])
-                ? profileConfig["taskLeadProfiles"]
-                : {},
-            });
-            const configPath = await writeOpenCodeConfig(config, options.configDir);
-
-            return [
-              formatModelConfigReport({
-                roles: summarizeRoleModels(updatedEffectiveConfig),
-                taskLeadProfiles: summarizeTaskLeadProfileModels(updatedEffectiveConfig),
-                models: importedPool,
-                changed: result.changed,
-                skipped: result.skipped,
-                warnings: result.warnings,
-                profileChanged: profileResult.changed,
-                profileSkipped: profileResult.skipped,
-                profileWarnings: profileResult.warnings,
-                reasoningChanged: reasoningResult.changed,
-                reasoningSkipped: reasoningResult.skipped,
-              }),
-              "",
-              `Updated ${configPath}. Restart OpenCode or start a new session if the active TUI keeps old model state.`,
-            ].join("\n");
-          }
-
-          throw new Error("bounded_lite_model_config action must be import, list, auto, or apply.");
         },
       },
     },

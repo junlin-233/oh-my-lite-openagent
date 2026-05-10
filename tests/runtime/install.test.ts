@@ -42,4 +42,16 @@ describe("global installer contract", () => {
     expect(installScript).toContain('"gateway"');
     expect(installScript).not.toContain('["opencode", "opencode-go", "fish"]');
   });
+
+  it("keeps installer recommendation naming aligned with runtime nano model IDs", () => {
+    expect(installScript).toContain('"gpt-5.4-nano"');
+    expect(installScript).not.toContain('"gpt-5-nano"');
+  });
+
+  it("keeps installer recommendation priorities aligned with v2 role preferences", () => {
+    expect(installScript).toContain('"deepseek-v4-pro"');
+    expect(installScript).toContain('"qwen3.6-plus"');
+    expect(installScript).toContain('"kimi-k2.6"');
+    expect(installScript).toContain('"minimax-m2.7"');
+  });
 });

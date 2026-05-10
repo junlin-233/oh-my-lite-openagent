@@ -5,6 +5,7 @@ const configPath = path.resolve(process.cwd(), "opencode.json");
 const config = JSON.parse(readFileSync(configPath, "utf8")) as {
   default_agent?: string;
   command?: Record<string, { agent?: string; template?: string; description?: string }>;
+  plugin?: unknown;
   agent: Record<
     string,
     { mode: string; hidden?: boolean; description?: string; color?: string; prompt?: string }
@@ -22,17 +23,23 @@ describe("OpenCode agent topology", () => {
     });
     expect(config.command?.["agent-models"]?.description).toContain("per-role");
     expect(config.command?.["agent-models"]?.description).toContain("Task Lead profile assignments");
+    expect(config.command?.["agent-models"]?.description).toContain("user confirmation");
     expect(config.command?.["agent-models"]?.template).toContain("bounded_lite_model_config");
     expect(config.command?.["agent-models"]?.template).toContain('action: "import"');
     expect(config.command?.["agent-models"]?.template).toContain(
       "includes every discovered provider",
     );
     expect(config.command?.["agent-models"]?.template).toContain("opencode-go");
+    expect(config.command?.["agent-models"]?.template).toContain("connect 之后");
+    expect(config.command?.["agent-models"]?.template).toContain("runtime provider models");
+    expect(config.command?.["agent-models"]?.template).toContain("auth.json");
+    expect(config.command?.["agent-models"]?.template).toContain("models.dev");
     expect(config.command?.["agent-models"]?.template).toContain("action=auto is recommendation-only");
     expect(config.command?.["agent-models"]?.template).toContain("Task Lead profile recommendations");
     expect(config.command?.["agent-models"]?.template).toContain("taskLeadProfileAssignments");
     expect(config.command?.["agent-models"]?.template).toContain("Do not create new Task Lead agents");
     expect(config.command?.["agent-models"]?.template).toContain("ask whether they want changes");
+    expect(JSON.stringify(config.plugin)).not.toContain('"multimodal": "');
   });
 
   it("registers eight bounded roles plus disabled built-in overrides", () => {

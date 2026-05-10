@@ -9,6 +9,10 @@
 
 export interface ProviderModelLike {
   id: string;
+  connected?: boolean;
+  origin?: string;
+  reasoning?: boolean;
+  priorityScore?: number;
 }
 
 export interface TaskLeadModelPattern {
@@ -48,6 +52,9 @@ export interface AutoTaskLeadProfileModelResult {
     profile: string;
     model: string;
     matchedPattern: string;
+    source?: string;
+    connected?: boolean;
+    priorityScore?: number;
   }>;
   unresolved: Array<{
     profile: string;
@@ -61,9 +68,11 @@ export const DEFAULT_TASK_LEAD_PROFILES: readonly TaskLeadProfile[] = [
     attributes: ["quick"],
     fallbackPatterns: [
       { pattern: "gpt-5.4-mini", reason: "Fast low-cost execution" },
-      { pattern: "claude-haiku", reason: "Very fast lightweight execution" },
-      { pattern: "gemini-3-flash", reason: "Fast flash-class execution" },
       { pattern: "minimax-m2.7-highspeed", reason: "High-speed subscription fallback" },
+      { pattern: "gemini-3-flash", reason: "Fast flash-class execution" },
+      { pattern: "claude-haiku-4-5", reason: "Very fast lightweight execution" },
+      { pattern: "deepseek-v4-flash", reason: "Fast OpenCode Go execution fallback" },
+      { pattern: "gpt-5.4-nano", reason: "Very low-cost execution fallback" },
       { pattern: "big-pickle", reason: "Free fallback" },
     ],
     promptAppend: "Prefer minimal, targeted edits and avoid broad refactors.",
@@ -73,11 +82,13 @@ export const DEFAULT_TASK_LEAD_PROFILES: readonly TaskLeadProfile[] = [
     description: "Implementation, refactoring, tests, and bounded bug fixes.",
     attributes: ["code"],
     fallbackPatterns: [
-      { pattern: "claude-sonnet", reason: "Strong coding execution with good context handling" },
-      { pattern: "kimi-k2", reason: "Good implementation capability" },
+      { pattern: "claude-sonnet-4-6", reason: "Strong coding execution with good context handling" },
       { pattern: "gpt-5.4", reason: "Strong code generation and tool use" },
+      { pattern: "kimi-k2.6", reason: "Strong OpenCode Go implementation capability" },
+      { pattern: "kimi-k2.5", reason: "Strong OpenCode Go implementation fallback" },
+      { pattern: "deepseek-v4-pro", reason: "Strong OpenCode Go coding fallback" },
       { pattern: "gpt-5.3-codex", reason: "Coding-focused fallback" },
-      { pattern: "minimax-m2", reason: "Budget implementation fallback" },
+      { pattern: "minimax-m2.7", reason: "Budget OpenCode Go implementation fallback" },
     ],
     promptAppend: "Focus on correct implementation, tests, and minimal scoped changes.",
   },
@@ -88,7 +99,9 @@ export const DEFAULT_TASK_LEAD_PROFILES: readonly TaskLeadProfile[] = [
     fallbackPatterns: [
       { pattern: "gpt-5.4-mini", reason: "Fast research and summarization" },
       { pattern: "minimax-m2.7-highspeed", reason: "High-speed lookup" },
-      { pattern: "claude-haiku", reason: "Fast documentation comprehension" },
+      { pattern: "claude-haiku-4-5", reason: "Fast documentation comprehension" },
+      { pattern: "deepseek-v4-flash", reason: "Fast OpenCode Go broad-context research fallback" },
+      { pattern: "qwen3.5-plus", reason: "Fast OpenCode Go documentation lookup fallback" },
       { pattern: "gemini-3-flash", reason: "Fast broad-context research" },
     ],
     promptAppend: "Prioritize checked evidence and concise handoff notes.",
@@ -98,10 +111,12 @@ export const DEFAULT_TASK_LEAD_PROFILES: readonly TaskLeadProfile[] = [
     description: "Documentation, README, migration notes, and user-facing prose.",
     attributes: ["writing"],
     fallbackPatterns: [
+      { pattern: "gpt-5.4", reason: "Strong general writing and editing model" },
+      { pattern: "claude-sonnet-4-6", reason: "High-quality prose and documentation" },
+      { pattern: "kimi-k2.6", reason: "Good OpenCode Go structured writing fallback" },
+      { pattern: "qwen3.6-plus", reason: "Solid OpenCode Go writing fallback" },
       { pattern: "gemini-3-flash", reason: "Fast drafting and editing" },
-      { pattern: "kimi-k2", reason: "Good structured writing fallback" },
-      { pattern: "claude-sonnet", reason: "High-quality prose and documentation" },
-      { pattern: "minimax-m2", reason: "Budget writing fallback" },
+      { pattern: "minimax-m2.7", reason: "Budget OpenCode Go writing fallback" },
     ],
     promptAppend: "Optimize for clear, accurate prose while preserving repository terminology.",
   },
@@ -110,10 +125,13 @@ export const DEFAULT_TASK_LEAD_PROFILES: readonly TaskLeadProfile[] = [
     description: "UI, screenshots, multimodal inspection, and visual verification.",
     attributes: ["multimodal", "visual"],
     fallbackPatterns: [
+      { pattern: "gpt-5.4", reason: "Strong multimodal and UI reasoning option" },
       { pattern: "gemini-3.1-pro", reason: "Strong multimodal and visual reasoning" },
-      { pattern: "gpt-5.4", reason: "Strong general reasoning fallback" },
-      { pattern: "claude-opus", reason: "Strong critical reasoning if vision path is available" },
-      { pattern: "glm-5", reason: "Capable fallback" },
+      { pattern: "mimo-v2-omni", reason: "OpenCode Go multimodal model" },
+      { pattern: "mimo-v2.5-pro", reason: "OpenCode Go multimodal reasoning fallback" },
+      { pattern: "kimi-k2.6", reason: "OpenCode Go visual fallback with strong general capability" },
+      { pattern: "claude-opus-4-7", reason: "Strong critical reasoning if vision path is available" },
+      { pattern: "deepseek-v4-pro", reason: "OpenCode Go visual reasoning fallback" },
     ],
     promptAppend: "Account for visual/UI behavior and call out any missing visual evidence.",
   },
@@ -123,9 +141,12 @@ export const DEFAULT_TASK_LEAD_PROFILES: readonly TaskLeadProfile[] = [
     attributes: ["deep", "large-context"],
     fallbackPatterns: [
       { pattern: "gpt-5.5", reason: "Strongest deep execution profile" },
-      { pattern: "claude-opus", reason: "Excellent deep reasoning" },
-      { pattern: "gemini-3.1-pro", reason: "Long-context reasoning fallback" },
       { pattern: "gpt-5.4", reason: "Strong reasoning fallback" },
+      { pattern: "claude-opus-4-7", reason: "Excellent deep reasoning" },
+      { pattern: "deepseek-v4-pro", reason: "Strong OpenCode Go deep reasoning fallback" },
+      { pattern: "qwen3.6-plus", reason: "Solid OpenCode Go long-context fallback" },
+      { pattern: "kimi-k2.6", reason: "OpenCode Go deep execution fallback" },
+      { pattern: "glm-5.1", reason: "OpenCode Go structured deep fallback" },
     ],
     promptAppend: "Work carefully through dependencies and preserve all acceptance criteria.",
   },
@@ -135,8 +156,11 @@ export const DEFAULT_TASK_LEAD_PROFILES: readonly TaskLeadProfile[] = [
     attributes: ["risk-high", "security", "migration"],
     fallbackPatterns: [
       { pattern: "gpt-5.4", reason: "Strong critical reasoning for risky changes" },
-      { pattern: "claude-opus", reason: "Excellent risk analysis" },
-      { pattern: "gemini-3.1-pro", reason: "Strong structured evaluation fallback" },
+      { pattern: "claude-opus-4-7", reason: "Excellent risk analysis" },
+      { pattern: "deepseek-v4-pro", reason: "Strong OpenCode Go risk analysis fallback" },
+      { pattern: "qwen3.6-plus", reason: "Strong OpenCode Go structured evaluation fallback" },
+      { pattern: "claude-sonnet-4-6", reason: "Solid safety-focused fallback" },
+      { pattern: "glm-5.1", reason: "OpenCode Go structured risk fallback" },
     ],
     promptAppend: "Treat this as high-risk work: preserve invariants and surface blockers instead of guessing.",
   },
@@ -230,7 +254,7 @@ export function resolveAutoTaskLeadProfileModels(
   const unresolved: AutoTaskLeadProfileModelResult["unresolved"] = [];
 
   for (const profile of DEFAULT_TASK_LEAD_PROFILES) {
-    const match = findFirstMatchingModel(profile, availableModels);
+    const match = findBestMatchingModel(profile, availableModels);
 
     if (match) {
       assignments[profile.name] = match.model;
@@ -238,6 +262,9 @@ export function resolveAutoTaskLeadProfileModels(
         profile: profile.name,
         model: match.model,
         matchedPattern: match.pattern,
+        ...(match.source ? { source: match.source } : {}),
+        ...(typeof match.connected === "boolean" ? { connected: match.connected } : {}),
+        ...(typeof match.priorityScore === "number" ? { priorityScore: match.priorityScore } : {}),
       });
     } else {
       unresolved.push({ profile: profile.name });
@@ -259,7 +286,9 @@ export function formatTaskLeadProfileModelReport(
       const profile = findTaskLeadProfile(item.profile);
       const reason = profile?.fallbackPatterns.find((entry) => entry.pattern === item.matchedPattern)?.reason ??
         "Best available profile match";
-      lines.push(`  ✓ ${item.profile}: ${item.model} (${reason})`);
+      const source = item.source ? `; source=${item.source}` : "";
+      const connected = typeof item.connected === "boolean" ? `; connected=${item.connected}` : "";
+      lines.push(`  ✓ ${item.profile}: ${item.model} (${reason}${source}${connected})`);
     }
   } else {
     lines.push("  <none resolved>");
@@ -296,13 +325,52 @@ function resolveFallbackChainFromPatterns(
   )));
 }
 
-function findFirstMatchingModel(
+function sourceRank(origin?: string): number {
+  switch (origin) {
+    case "runtime-provider-list":
+      return 500;
+    case "models-dev-fallback":
+      return 300;
+    case "credential-provider-fallback":
+      return 200;
+    case "configured-model":
+      return 100;
+    case "opencode-json-provider":
+      return 50;
+    default:
+      return 0;
+  }
+}
+
+function candidateScore(model: ProviderModelLike): number {
+  const baseScore = typeof model.priorityScore === "number"
+    ? model.priorityScore
+    : sourceRank(model.origin) + (model.connected ? 40 : 0);
+
+  return baseScore + (model.reasoning ? 5 : 0);
+}
+
+function findBestMatchingModel(
   profile: TaskLeadProfile,
   availableModels: readonly ProviderModelLike[],
-): { model: string; pattern: string } | undefined {
+): { model: string; pattern: string; source?: string; connected?: boolean; priorityScore?: number } | undefined {
   for (const entry of profile.fallbackPatterns) {
-    const model = availableModels.find((item) => matchesPattern(item.id, entry.pattern));
-    if (model) return { model: model.id, pattern: entry.pattern };
+    const model = [...availableModels]
+      .filter((item) => matchesPattern(item.id, entry.pattern))
+      .sort((left, right) => {
+        const scoreDiff = candidateScore(right) - candidateScore(left);
+        if (scoreDiff !== 0) return scoreDiff;
+        return left.id.localeCompare(right.id);
+      })[0];
+    if (model) {
+      return {
+        model: model.id,
+        pattern: entry.pattern,
+        ...(model.origin ? { source: model.origin } : {}),
+        ...(typeof model.connected === "boolean" ? { connected: model.connected } : {}),
+        ...(typeof model.priorityScore === "number" ? { priorityScore: model.priorityScore } : {}),
+      };
+    }
   }
 
   return undefined;

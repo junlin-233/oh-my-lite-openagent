@@ -43,6 +43,7 @@ describe("task lead profile dispatch", () => {
     const dispatch = resolveTaskLeadProfileDispatch(["code"], {
       availableModels: [
         { id: "opencode-go/minimax-m2.7" },
+        { id: "openai/gpt-5.4" },
         { id: "opencode/claude-sonnet-4-6" },
       ],
     });
@@ -54,6 +55,7 @@ describe("task lead profile dispatch", () => {
     });
     expect(dispatch.fallbackChain).toEqual([
       "opencode/claude-sonnet-4-6",
+      "openai/gpt-5.4",
       "opencode-go/minimax-m2.7",
     ]);
   });
@@ -72,11 +74,22 @@ describe("task lead profile dispatch", () => {
     const result = resolveAutoTaskLeadProfileModels([
       { id: "openai/gpt-5.4-mini" },
       { id: "google/gemini-3.1-pro" },
+      { id: "openai/gpt-5.4" },
     ]);
     const report = formatTaskLeadProfileModelReport(result);
 
     expect(result.assignments.quick).toBe("openai/gpt-5.4-mini");
-    expect(result.assignments.visual).toBe("google/gemini-3.1-pro");
+    expect(result.assignments.visual).toBe("openai/gpt-5.4");
     expect(report).toContain("Task Lead profile model recommendations");
   });
+
+  it("prefers runtime/connected profile candidates over configured-only matches", () => {
+    const result = resolveAutoTaskLeadProfileModels([
+      { id: "custom/gpt-5.4-mini", origin: "configured-model", connected: false, priorityScore: 100 },
+      { id: "openai/gpt-5.4-mini", origin: "runtime-provider-list", connected: true, priorityScore: 540 },
+    ]);
+
+    expect(result.assignments.quick).toBe("openai/gpt-5.4-mini");
+  });
+
 });
