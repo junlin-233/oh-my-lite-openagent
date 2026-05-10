@@ -2,6 +2,7 @@ import {
   applyTaskLeadProfileModelConfig,
   applyRoleModelConfig,
   applyRoleReasoningEffortConfig,
+  buildDiscoveredModelPool,
   classifyModelFamily,
   classifyModelProvider,
   formatModelConfigReport,
@@ -266,6 +267,54 @@ describe("role model configuration", () => {
     ]);
   });
 
+  it("builds a unified discovered pool from runtime, connected providers, and fallbacks", () => {
+    const pool = buildDiscoveredModelPool({
+      connectedProviderIds: ["openai", "opencode-go"],
+      runtimeModels: [
+        { provider: "openai", model: "gpt-5.4", id: "openai/gpt-5.4", origin: "runtime-provider-list" },
+      ],
+      modelsDevModels: [
+        { provider: "openai", model: "gpt-5.4-mini", id: "openai/gpt-5.4-mini", origin: "models-dev-fallback" },
+      ],
+      credentialFallbackModels: [
+        { provider: "opencode-go", model: "kimi-k2.5", id: "opencode-go/kimi-k2.5", origin: "credential-provider-fallback" },
+      ],
+      configuredModels: [
+        { provider: "custom", model: "legacy", id: "custom/legacy", origin: "configured-model" },
+      ],
+    });
+
+    expect(pool.connectedProviderIds).toEqual(["openai", "opencode-go"]);
+    expect(pool.models.find((model) => model.id === "openai/gpt-5.4")).toMatchObject({
+      connected: true,
+      origin: "runtime-provider-list",
+    });
+    expect(pool.models.find((model) => model.id === "openai/gpt-5.4-mini")).toMatchObject({
+      connected: true,
+      origin: "models-dev-fallback",
+    });
+    expect(pool.models.find((model) => model.id === "custom/legacy")).toMatchObject({
+      connected: false,
+      origin: "configured-model",
+    });
+  });
+
+  it("can build a pool for connected providers even when config has no explicit models", () => {
+    const pool = buildDiscoveredModelPool({
+      connectedProviderIds: ["openai"],
+      modelsDevModels: [
+        { provider: "openai", model: "gpt-5.4", id: "openai/gpt-5.4", origin: "models-dev-fallback" },
+      ],
+    });
+
+    expect(pool.models).toHaveLength(1);
+    expect(pool.models[0]).toMatchObject({
+      id: "openai/gpt-5.4",
+      connected: true,
+      origin: "models-dev-fallback",
+    });
+  });
+
   it("summarizes inherited and role-specific models", () => {
     const summary = summarizeRoleModels({
       model: "openai/gpt-5.4",
@@ -441,9 +490,9 @@ describe("role model configuration", () => {
       { provider: "google", model: "gemini-3-flash", id: "google/gemini-3-flash" },
     ]);
 
-    expect(result.assignments["command-lead"]).toBe("anthropic/claude-opus-4-7");
+    expect(result.assignments["command-lead"]).toBe("openai/gpt-5.4-mini");
     expect(result.assignments.explore).toBe("openai/gpt-5.4-mini");
-    expect(result.assignments["deep-plan-builder"]).toBe("google/gemini-3-flash");
+    expect(result.assignments["deep-plan-builder"]).toBe("anthropic/claude-opus-4-7");
   });
 
   it("summarizes and applies Task Lead profile model assignments", () => {
@@ -479,13 +528,31 @@ describe("role model configuration", () => {
     });
   });
 
+  it("summarizes legacy string-shaped Task Lead profile config values", () => {
+    const summary = summarizeTaskLeadProfileModels({
+      agent: {
+        "task-lead": { mode: "subagent", model: "opencode/kimi-k2.5" },
+      },
+      taskLeadProfiles: {
+        quick: "openai/gpt-5.4-mini",
+      },
+    });
+
+    expect(summary.find((profile) => profile.profile === "quick")).toMatchObject({
+      configuredModel: "openai/gpt-5.4-mini",
+      effectiveModel: "openai/gpt-5.4-mini",
+      inheritsTaskLeadModel: false,
+    });
+  });
+
   it("resolves automatic Task Lead profile models from available provider models", () => {
     const result = resolveAutoTaskLeadProfileModels([
       { id: "openai/gpt-5.4-mini" },
       { id: "google/gemini-3.1-pro" },
+      { id: "openai/gpt-5.4" },
     ]);
 
     expect(result.assignments.quick).toBe("openai/gpt-5.4-mini");
-    expect(result.assignments.visual).toBe("google/gemini-3.1-pro");
+    expect(result.assignments.visual).toBe("openai/gpt-5.4");
   });
 });

@@ -39,6 +39,8 @@ export interface ProviderModel {
   origin?: "opencode-json-provider" | "runtime-provider-list" | "models-dev-fallback" | "configured-model" | "credential-provider-fallback";
   reasoning?: boolean;
   variants?: string[];
+  connected?: boolean;
+  priorityScore?: number;
 }
 
 export type RoleCapability =
@@ -76,6 +78,9 @@ export interface AutoModelResult {
     role: RoleName;
     model: string;
     matchedPattern: string;
+    source?: ProviderModel["origin"];
+    connected?: boolean;
+    priorityScore?: number;
   }>;
   /** Roles that had no matching model in the available set */
   unresolved: Array<{
@@ -113,23 +118,17 @@ export const ROLE_MODEL_PROFILES: readonly RoleModelProfile[] = [
     capability: "orchestration",
     description: "Main orchestrator — needs the strongest reasoning model to route, delegate, and verify.",
     recommendations: [
-      // Tier 1: strongest reasoning — Claude Opus
-      { pattern: "claude-opus", reason: "Best orchestration model with strong multi-step reasoning" },
-      // Tier 2: very strong reasoning — GPT-5.4
-      { pattern: "gpt-5.4", reason: "Strong reasoning and tool use" },
-      // Tier 3: strong reasoning — Gemini Pro
-      { pattern: "gemini-2.5-pro", reason: "Good reasoning with long context" },
-      { pattern: "gemini-3.1-pro", reason: "Good reasoning with long context" },
-      // Tier 4: solid mid-high reasoning
-      { pattern: "claude-sonnet", reason: "Strong reasoning, slightly below Opus" },
-      { pattern: "kimi-k2", reason: "Good coding capability" },
-      { pattern: "gpt-4o", reason: "Capable general-purpose model" },
-      // Tier 5: mid-tier fallback
-      { pattern: "glm-5", reason: "Capable Chinese-developed model" },
-      { pattern: "minimax-m2", reason: "Decent mid-tier fallback" },
-      // Tier 6: free / low-cost final fallback
+      { pattern: "gpt-5.4", reason: "Preferred orchestration model with strong tool use and routing stability" },
+      { pattern: "gpt-5.5", reason: "Stronger GPT-family orchestration fallback when available" },
+      { pattern: "claude-opus-4-7", reason: "Very strong orchestration fallback with deep reasoning" },
+      { pattern: "claude-opus-4-6", reason: "Very strong orchestration fallback with deep reasoning" },
+      { pattern: "kimi-k2.6", reason: "Strong OpenCode Go orchestration option" },
+      { pattern: "deepseek-v4-pro", reason: "Strong OpenCode Go reasoning and coding fallback" },
+      { pattern: "qwen3.6-plus", reason: "Solid OpenCode Go orchestration fallback" },
+      { pattern: "glm-5.1", reason: "Capable OpenCode Go general fallback" },
+      { pattern: "minimax-m2.7", reason: "Usable OpenCode Go fallback when stronger models are unavailable" },
       { pattern: "big-pickle", reason: "Free opencode/ fallback — lowest tier but always available" },
-      { pattern: "gpt-5-nano", reason: "Ultra-low-cost fallback" },
+      { pattern: "gpt-5.4-nano", reason: "Ultra-low-cost final fallback" },
     ],
   },
   {
@@ -137,15 +136,15 @@ export const ROLE_MODEL_PROFILES: readonly RoleModelProfile[] = [
     capability: "planning",
     description: "Visible planner — needs strong reasoning to generate structured, executable plans.",
     recommendations: [
-      { pattern: "claude-opus", reason: "Best at structured planning with clear dependencies" },
+      { pattern: "claude-opus-4-7", reason: "Best at structured planning with clear dependencies" },
       { pattern: "gpt-5.4", reason: "Strong structured output and reasoning" },
-      { pattern: "gemini-2.5-pro", reason: "Good at structured generation" },
-      { pattern: "gemini-3.1-pro", reason: "Good at structured generation" },
-      { pattern: "claude-sonnet", reason: "Capable planning with good follow-through" },
-      { pattern: "kimi-k2", reason: "Good structured output" },
-      { pattern: "gpt-4o", reason: "Capable planning model" },
-      { pattern: "glm-5", reason: "Reasonable planning capability" },
-      { pattern: "minimax-m2", reason: "Basic planning fallback" },
+      { pattern: "deepseek-v4-pro", reason: "Strong planning and code-aware fallback" },
+      { pattern: "claude-sonnet-4-6", reason: "Capable planning with good follow-through" },
+      { pattern: "kimi-k2.6", reason: "Good OpenCode Go planning option" },
+      { pattern: "qwen3.6-plus", reason: "Solid OpenCode Go structured-output fallback" },
+      { pattern: "glm-5.1", reason: "Reasonable OpenCode Go planning fallback" },
+      { pattern: "gemini-3.1-pro", reason: "Usable planning fallback where Gemini is available" },
+      { pattern: "minimax-m2.7", reason: "Basic OpenCode Go planning fallback" },
       { pattern: "big-pickle", reason: "Free fallback" },
     ],
   },
@@ -154,16 +153,14 @@ export const ROLE_MODEL_PROFILES: readonly RoleModelProfile[] = [
     capability: "advisory-planning",
     description: "Deep planner — produces detailed plans suitable for lower-strength executors.",
     recommendations: [
-      // This role produces detailed plans that lower-strength executors can follow.
-      { pattern: "claude-sonnet", reason: "Strong planning with good context handling" },
-      { pattern: "kimi-k2", reason: "Good reasoning for planning tasks" },
-      { pattern: "gemini-3-flash", reason: "Fast and capable for advisory planning" },
-      { pattern: "gpt-5.4", reason: "Strong reasoning if available" },
-      { pattern: "claude-opus", reason: "Excellent if available" },
-      { pattern: "gpt-4o", reason: "Capable alternative" },
-      { pattern: "gpt-5.3-codex", reason: "Reasonable coding-focused alternative" },
-      { pattern: "glm-5", reason: "Reasonable Chinese-developed alternative" },
-      { pattern: "minimax-m2", reason: "Budget fallback with mandatory review" },
+      { pattern: "claude-opus-4-7", reason: "Best deep planning model for detailed executable handoffs" },
+      { pattern: "gpt-5.4", reason: "Strong reasoning and structure for deep planning" },
+      { pattern: "deepseek-v4-pro", reason: "Strong OpenCode Go deep-planning fallback" },
+      { pattern: "claude-sonnet-4-6", reason: "Good detailed-planning fallback" },
+      { pattern: "kimi-k2.6", reason: "Good OpenCode Go planning fallback" },
+      { pattern: "qwen3.6-plus", reason: "Solid OpenCode Go long-form planning fallback" },
+      { pattern: "glm-5.1", reason: "Usable OpenCode Go structured fallback" },
+      { pattern: "minimax-m2.7", reason: "Budget OpenCode Go fallback with mandatory review" },
       { pattern: "big-pickle", reason: "Free fallback with mandatory review" },
     ],
   },
@@ -172,15 +169,16 @@ export const ROLE_MODEL_PROFILES: readonly RoleModelProfile[] = [
     capability: "execution",
     description: "Bounded task executor — mid-tier models sufficient for clear-scope implementation.",
     recommendations: [
-      { pattern: "claude-sonnet", reason: "Strong execution with good context handling" },
-      { pattern: "kimi-k2", reason: "Good coding capability for implementation" },
-      { pattern: "gpt-5.4", reason: "Strong code generation" },
-      { pattern: "gemini-2.5-pro", reason: "Good implementation capability" },
-      { pattern: "gemini-3.1-pro", reason: "Good implementation capability" },
-      { pattern: "gpt-4o", reason: "Capable implementation model" },
+      { pattern: "claude-sonnet-4-6", reason: "Strong execution with good context handling" },
+      { pattern: "gpt-5.4", reason: "Preferred GPT-family implementation model" },
+      { pattern: "kimi-k2.6", reason: "Strong OpenCode Go coding execution option" },
+      { pattern: "kimi-k2.5", reason: "Strong OpenCode Go coding fallback" },
+      { pattern: "deepseek-v4-pro", reason: "Strong OpenCode Go code generation fallback" },
       { pattern: "gpt-5.3-codex", reason: "Coding-focused implementation model" },
-      { pattern: "minimax-m2", reason: "Decent mid-tier execution" },
-      { pattern: "gpt-5-nano", reason: "Budget execution fallback" },
+      { pattern: "qwen3.6-plus", reason: "Solid OpenCode Go execution fallback" },
+      { pattern: "minimax-m2.7", reason: "Decent OpenCode Go mid-tier execution fallback" },
+      { pattern: "minimax-m2.5", reason: "Budget OpenCode Go execution fallback" },
+      { pattern: "gpt-5.4-nano", reason: "Budget execution fallback" },
       { pattern: "big-pickle", reason: "Free execution fallback" },
     ],
   },
@@ -190,12 +188,12 @@ export const ROLE_MODEL_PROFILES: readonly RoleModelProfile[] = [
     description: "Read-only code exploration — fast, cheap models preferred for low-latency lookups.",
     recommendations: [
       { pattern: "gpt-5.4-mini", reason: "Fast and cheap for exploration" },
-      { pattern: "claude-haiku", reason: "Very fast with good accuracy" },
       { pattern: "minimax-m2.7-highspeed", reason: "High-speed retrieval" },
-      { pattern: "minimax-m2", reason: "Fast retrieval" },
-      { pattern: "gemini-2.0-flash", reason: "Fast exploration" },
-      { pattern: "gemini-3-flash", reason: "Fast exploration" },
-      { pattern: "gpt-5-nano", reason: "Budget-fast exploration" },
+      { pattern: "minimax-m2.7", reason: "Fast OpenCode Go retrieval fallback" },
+      { pattern: "claude-haiku-4-5", reason: "Very fast with good accuracy" },
+      { pattern: "deepseek-v4-flash", reason: "Fast OpenCode Go exploration fallback" },
+      { pattern: "qwen3.5-plus", reason: "Fast OpenCode Go retrieval fallback" },
+      { pattern: "gpt-5.4-nano", reason: "Budget-fast exploration" },
       { pattern: "big-pickle", reason: "Free fallback for exploration" },
     ],
   },
@@ -205,12 +203,12 @@ export const ROLE_MODEL_PROFILES: readonly RoleModelProfile[] = [
     description: "External research — fast, cheap models preferred for documentation lookups.",
     recommendations: [
       { pattern: "gpt-5.4-mini", reason: "Fast and cheap for research" },
-      { pattern: "claude-haiku", reason: "Fast with good accuracy for docs" },
       { pattern: "minimax-m2.7-highspeed", reason: "High-speed research" },
-      { pattern: "minimax-m2", reason: "Fast research" },
-      { pattern: "gemini-2.0-flash", reason: "Fast documentation lookup" },
-      { pattern: "gemini-3-flash", reason: "Fast documentation lookup" },
-      { pattern: "gpt-5-nano", reason: "Budget-fast research" },
+      { pattern: "minimax-m2.7", reason: "Fast OpenCode Go research fallback" },
+      { pattern: "claude-haiku-4-5", reason: "Fast with good accuracy for docs" },
+      { pattern: "deepseek-v4-flash", reason: "Fast OpenCode Go documentation fallback" },
+      { pattern: "qwen3.5-plus", reason: "Fast OpenCode Go documentation lookup fallback" },
+      { pattern: "gpt-5.4-nano", reason: "Budget-fast research" },
       { pattern: "big-pickle", reason: "Free fallback for research" },
     ],
   },
@@ -220,13 +218,12 @@ export const ROLE_MODEL_PROFILES: readonly RoleModelProfile[] = [
     description: "Plan review — needs the strongest reasoning to catch subtle errors and gaps in plans.",
     recommendations: [
       { pattern: "gpt-5.4", reason: "Strongest reasoning for catching plan errors" },
-      { pattern: "claude-opus", reason: "Excellent at critical analysis" },
-      { pattern: "gemini-2.5-pro", reason: "Good at structured evaluation" },
-      { pattern: "gemini-3.1-pro", reason: "Good at structured evaluation" },
-      { pattern: "claude-sonnet", reason: "Good evaluation capability" },
-      { pattern: "gpt-4o", reason: "Decent review capability" },
-      { pattern: "glm-5", reason: "Reasonable review capability" },
-      { pattern: "minimax-m2", reason: "Basic review fallback" },
+      { pattern: "claude-opus-4-7", reason: "Excellent at critical analysis" },
+      { pattern: "deepseek-v4-pro", reason: "Strong OpenCode Go review fallback" },
+      { pattern: "qwen3.6-plus", reason: "Strong OpenCode Go structured review fallback" },
+      { pattern: "claude-sonnet-4-6", reason: "Good evaluation capability" },
+      { pattern: "glm-5.1", reason: "Reasonable OpenCode Go review fallback" },
+      { pattern: "minimax-m2.7", reason: "Basic OpenCode Go review fallback" },
       { pattern: "big-pickle", reason: "Free fallback for review" },
     ],
   },
@@ -236,13 +233,12 @@ export const ROLE_MODEL_PROFILES: readonly RoleModelProfile[] = [
     description: "Result review — needs the strongest reasoning to verify execution completeness and quality.",
     recommendations: [
       { pattern: "gpt-5.4", reason: "Strongest reasoning for result verification" },
-      { pattern: "claude-opus", reason: "Excellent at detecting missing or incorrect results" },
-      { pattern: "gemini-2.5-pro", reason: "Good at comprehensive evaluation" },
-      { pattern: "gemini-3.1-pro", reason: "Good at comprehensive evaluation" },
-      { pattern: "claude-sonnet", reason: "Good verification capability" },
-      { pattern: "gpt-4o", reason: "Decent result verification" },
-      { pattern: "glm-5", reason: "Reasonable verification" },
-      { pattern: "minimax-m2", reason: "Basic verification fallback" },
+      { pattern: "claude-opus-4-7", reason: "Excellent at detecting missing or incorrect results" },
+      { pattern: "deepseek-v4-pro", reason: "Strong OpenCode Go verification fallback" },
+      { pattern: "qwen3.6-plus", reason: "Strong OpenCode Go evaluation fallback" },
+      { pattern: "claude-sonnet-4-6", reason: "Good verification capability" },
+      { pattern: "glm-5.1", reason: "Reasonable OpenCode Go verification fallback" },
+      { pattern: "minimax-m2.7", reason: "Basic OpenCode Go verification fallback" },
       { pattern: "big-pickle", reason: "Free fallback for verification" },
     ],
   },
@@ -258,6 +254,44 @@ export const ROLE_MODEL_PROFILES: readonly RoleModelProfile[] = [
  */
 function matchesPattern(modelId: string, pattern: string): boolean {
   return modelId.toLowerCase().includes(pattern.toLowerCase());
+}
+
+function sourceRank(origin?: ProviderModel["origin"]): number {
+  switch (origin) {
+    case "runtime-provider-list":
+      return 500;
+    case "models-dev-fallback":
+      return 300;
+    case "credential-provider-fallback":
+      return 200;
+    case "configured-model":
+      return 100;
+    case "opencode-json-provider":
+      return 50;
+    default:
+      return 0;
+  }
+}
+
+function candidateScore(model: ProviderModel): number {
+  const baseScore = typeof model.priorityScore === "number"
+    ? model.priorityScore
+    : sourceRank(model.origin) + (model.connected ? 40 : 0);
+
+  return baseScore + (model.reasoning ? 5 : 0);
+}
+
+function chooseBestCandidate(
+  availableModels: readonly ProviderModel[],
+  pattern: string,
+): ProviderModel | undefined {
+  return [...availableModels]
+    .filter((model) => matchesPattern(model.id, pattern))
+    .sort((left, right) => {
+      const scoreDiff = candidateScore(right) - candidateScore(left);
+      if (scoreDiff !== 0) return scoreDiff;
+      return left.id.localeCompare(right.id);
+    })[0];
 }
 
 /**
@@ -276,32 +310,17 @@ export function resolveAutoModels(
   const resolved: AutoModelResult["resolved"] = [];
   const unresolved: AutoModelResult["unresolved"] = [];
 
-  const modelIds = availableModels.map((model) => model.id);
-
-  // Preserve existing model assignments from current config
-  const agents = currentConfig?.agent;
-  const existingAssignments: Record<string, string> = {};
-  if (agents && typeof agents === "object" && agents !== null && !Array.isArray(agents)) {
-    for (const [role, agentValue] of Object.entries(agents as Record<string, unknown>)) {
-      if (typeof agentValue === "object" && agentValue !== null && !Array.isArray(agentValue)) {
-        const agent = agentValue as Record<string, unknown>;
-        if (typeof agent.model === "string") {
-          existingAssignments[role] = agent.model;
-        }
-      }
-    }
-  }
-
   for (const profile of ROLE_MODEL_PROFILES) {
     let bestModel: string | undefined;
     let matchedPattern: string | undefined;
+    let matchedCandidate: ProviderModel | undefined;
 
-    // Try each recommendation in priority order
     for (const recommendation of profile.recommendations) {
-      const matchedModelId = modelIds.find((id) => matchesPattern(id, recommendation.pattern));
-      if (matchedModelId) {
-        bestModel = matchedModelId;
+      const matchedModel = chooseBestCandidate(availableModels, recommendation.pattern);
+      if (matchedModel) {
+        bestModel = matchedModel.id;
         matchedPattern = recommendation.pattern;
+        matchedCandidate = matchedModel;
         break;
       }
     }
@@ -312,6 +331,9 @@ export function resolveAutoModels(
         role: profile.role,
         model: bestModel,
         matchedPattern,
+        ...(matchedCandidate?.origin ? { source: matchedCandidate.origin } : {}),
+        ...(typeof matchedCandidate?.connected === "boolean" ? { connected: matchedCandidate.connected } : {}),
+        ...(typeof matchedCandidate?.priorityScore === "number" ? { priorityScore: matchedCandidate.priorityScore } : {}),
       });
     } else {
       unresolved.push({
@@ -348,7 +370,9 @@ export function formatAutoModelReport(result: AutoModelResult): string {
       const reason = profile?.recommendations.find(
         (r) => r.pattern === item.matchedPattern,
       )?.reason ?? "Best available match";
-      lines.push(`  ✓ ${item.role}: ${item.model} (${reason})`);
+      const source = item.source ? `; source=${item.source}` : "";
+      const connected = typeof item.connected === "boolean" ? `; connected=${item.connected}` : "";
+      lines.push(`  ✓ ${item.role}: ${item.model} (${reason}${source}${connected})`);
     }
   } else {
     lines.push("  <none resolved>");

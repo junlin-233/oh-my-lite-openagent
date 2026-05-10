@@ -87,6 +87,17 @@ describe("role model recommendations", () => {
   });
 
   describe("resolveAutoModels", () => {
+    it("prefers runtime and connected candidates over lower-trust matches within the same pattern", () => {
+      const models: ProviderModel[] = [
+        { provider: "openai", model: "gpt-5.4", id: "openai/gpt-5.4", origin: "configured-model", connected: false, priorityScore: 100 },
+        { provider: "azure", model: "gpt-5.4", id: "azure/gpt-5.4", origin: "runtime-provider-list", connected: true, priorityScore: 540 },
+      ];
+
+      const result = resolveAutoModels(models);
+
+      expect(result.assignments["plan-review"]).toBe("azure/gpt-5.4");
+    });
+
     it("resolves all roles when all models are available", () => {
       const models: ProviderModel[] = [
         { provider: "anthropic", model: "claude-opus-4-7", id: "anthropic/claude-opus-4-7" },
@@ -100,8 +111,8 @@ describe("role model recommendations", () => {
 
       expect(result.resolved.length).toBe(8);
       expect(result.unresolved.length).toBe(0);
-      // command-lead should get claude-opus (highest recommendation for orchestration)
-      expect(result.assignments["command-lead"]).toContain("claude-opus");
+      // command-lead should now prefer gpt-5.4 over claude-opus
+      expect(result.assignments["command-lead"]).toBe("openai/gpt-5.4");
       // explore should get gpt-5.4-mini (fast-retrieval prefers cheap)
       expect(result.assignments["explore"]).toContain("gpt-5.4-mini");
       // librarian should get gpt-5.4-mini (fast-retrieval prefers cheap)
@@ -116,10 +127,19 @@ describe("role model recommendations", () => {
 
       const result = resolveAutoModels(models);
 
-      // gpt-4o should be matched by "gpt-4o" pattern for several roles
-      expect(result.resolved.length).toBeGreaterThanOrEqual(1);
-      // With only openai models, some fast-retrieval roles might not resolve
-      // because "gpt-5.4-mini" isn't present but "gpt-4o" and "gpt-4o-mini" might not match
+      // Under v2 preferences, plain gpt-4o alone may no longer satisfy any top-level role recommendation.
+      expect(result.resolved.length).toBe(0);
+    });
+
+    it("can use gpt-5.4-nano as the low-tier fallback when it is the only match", () => {
+      const models: ProviderModel[] = [
+        { provider: "openai", model: "gpt-5.4-nano", id: "openai/gpt-5.4-nano" },
+      ];
+
+      const result = resolveAutoModels(models);
+
+      expect(result.assignments["command-lead"]).toBe("openai/gpt-5.4-nano");
+      expect(result.assignments["task-lead"]).toBe("openai/gpt-5.4-nano");
     });
 
     it("reports unresolved roles when no matching model is available", () => {
@@ -140,32 +160,32 @@ describe("role model recommendations", () => {
 
       const result = resolveAutoModels(models);
 
-      // command-lead should get claude-opus (first recommendation)
-      expect(result.assignments["command-lead"]).toBe("anthropic/claude-opus-4-7");
+      // command-lead should now get gpt-5.4 (first recommendation)
+      expect(result.assignments["command-lead"]).toBe("openai/gpt-5.4");
       // plan-review should get gpt-5.4 (first recommendation for critical-review)
       expect(result.assignments["plan-review"]).toBe("openai/gpt-5.4");
     });
 
     it("matches models case-insensitively", () => {
       const models: ProviderModel[] = [
-        { provider: "Anthropic", model: "Claude-Opus-4-7", id: "Anthropic/Claude-Opus-4-7" },
+        { provider: "OpenAI", model: "GPT-5.4", id: "OpenAI/GPT-5.4" },
       ];
 
       const result = resolveAutoModels(models);
 
       expect(result.resolved.length).toBeGreaterThanOrEqual(1);
-      expect(result.assignments["command-lead"]).toBe("Anthropic/Claude-Opus-4-7");
+      expect(result.assignments["command-lead"]).toBe("OpenAI/GPT-5.4");
     });
 
     it("matches models across providers", () => {
       const models: ProviderModel[] = [
-        { provider: "opencode", model: "claude-opus-4-7", id: "opencode/claude-opus-4-7" },
+        { provider: "opencode-go", model: "kimi-k2.6", id: "opencode-go/kimi-k2.6" },
       ];
 
       const result = resolveAutoModels(models);
 
-      // Still matches "claude-opus" pattern regardless of provider
-      expect(result.assignments["command-lead"]).toBe("opencode/claude-opus-4-7");
+      // Still matches provider-agnostic patterns across providers
+      expect(result.assignments["command-lead"]).toBe("opencode-go/kimi-k2.6");
     });
 
     it("preserves existing model assignments in current config", () => {
@@ -206,8 +226,10 @@ describe("role model recommendations", () => {
       const patterns = getAllRecommendedPatterns();
       expect(patterns.length).toBeGreaterThan(0);
       // Should include some well-known patterns
-      expect(patterns).toContain("claude-opus");
+      expect(patterns).toContain("claude-opus-4-7");
       expect(patterns).toContain("gpt-5.4");
+      expect(patterns).toContain("gpt-5.4-nano");
+      expect(patterns).toContain("deepseek-v4-pro");
     });
   });
 

@@ -72,11 +72,233 @@ const PERMISSIVE_BASH_PERMISSION = {
 export const MANAGED_CONFIG = {
   "$schema": "https://opencode.ai/config.json",
   "default_agent": "command-lead",
+<<<<<<< HEAD:scripts/managed-config.mjs
+=======
+  "provider": {
+    "aiwanwu": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "AIWanwu",
+      "options": {
+        "baseURL": "https://www.aiwanwu.cc/v1",
+        "apiKey": "YOUR_AIWANWU_API_KEY_HERE"
+      },
+      "models": {
+        "gpt-5-codex": {
+          "name": "GPT-5 Codex",
+          "limit": {
+            "context": 400000,
+            "output": 128000
+          },
+          "options": {
+            "store": false
+          },
+          "variants": {
+            "low": {},
+            "medium": {},
+            "high": {}
+          }
+        },
+        "gpt-5.1-codex": {
+          "name": "GPT-5.1 Codex",
+          "limit": {
+            "context": 400000,
+            "output": 128000
+          },
+          "options": {
+            "store": false
+          },
+          "variants": {
+            "low": {},
+            "medium": {},
+            "high": {}
+          }
+        },
+        "gpt-5.1-codex-max": {
+          "name": "GPT-5.1 Codex Max",
+          "limit": {
+            "context": 400000,
+            "output": 128000
+          },
+          "options": {
+            "store": false
+          },
+          "variants": {
+            "low": {},
+            "medium": {},
+            "high": {}
+          }
+        },
+        "gpt-5.1-codex-mini": {
+          "name": "GPT-5.1 Codex Mini",
+          "limit": {
+            "context": 400000,
+            "output": 128000
+          },
+          "options": {
+            "store": false
+          },
+          "variants": {
+            "low": {},
+            "medium": {},
+            "high": {}
+          }
+        },
+        "gpt-5.2": {
+          "name": "GPT-5.2",
+          "limit": {
+            "context": 400000,
+            "output": 128000
+          },
+          "options": {
+            "store": false
+          },
+          "variants": {
+            "low": {},
+            "medium": {},
+            "high": {},
+            "xhigh": {}
+          }
+        },
+        "gpt-5.4": {
+          "name": "GPT-5.4",
+          "limit": {
+            "context": 1050000,
+            "output": 128000
+          },
+          "options": {
+            "store": false
+          },
+          "variants": {
+            "low": {},
+            "medium": {},
+            "high": {},
+            "xhigh": {}
+          }
+        },
+        "gpt-5.4-mini": {
+          "name": "GPT-5.4 Mini",
+          "limit": {
+            "context": 400000,
+            "output": 128000
+          },
+          "options": {
+            "store": false
+          },
+          "variants": {
+            "low": {},
+            "medium": {},
+            "high": {},
+            "xhigh": {}
+          }
+        },
+        "gpt-5.4-nano": {
+          "name": "GPT-5.4 Nano",
+          "limit": {
+            "context": 400000,
+            "output": 128000
+          },
+          "options": {
+            "store": false
+          },
+          "variants": {
+            "low": {},
+            "medium": {},
+            "high": {},
+            "xhigh": {}
+          }
+        },
+        "gpt-5.3-codex-spark": {
+          "name": "GPT-5.3 Codex Spark",
+          "limit": {
+            "context": 128000,
+            "output": 32000
+          },
+          "options": {
+            "store": false
+          },
+          "variants": {
+            "low": {},
+            "medium": {},
+            "high": {},
+            "xhigh": {}
+          }
+        },
+        "gpt-5.3-codex": {
+          "name": "GPT-5.3 Codex",
+          "limit": {
+            "context": 400000,
+            "output": 128000
+          },
+          "options": {
+            "store": false
+          },
+          "variants": {
+            "low": {},
+            "medium": {},
+            "high": {},
+            "xhigh": {}
+          }
+        },
+        "gpt-5.2-codex": {
+          "name": "GPT-5.2 Codex",
+          "limit": {
+            "context": 400000,
+            "output": 128000
+          },
+          "options": {
+            "store": false
+          },
+          "variants": {
+            "low": {},
+            "medium": {},
+            "high": {},
+            "xhigh": {}
+          }
+        },
+        "codex-mini-latest": {
+          "name": "Codex Mini",
+          "limit": {
+            "context": 200000,
+            "output": 100000
+          },
+          "options": {
+            "store": false
+          },
+          "variants": {
+            "low": {},
+            "medium": {},
+            "high": {}
+          }
+        }
+      }
+    }
+  },
+  "model": "aiwanwu/gpt-5.4",
+  "small_model": "aiwanwu/gpt-5.4-mini",
+  "plugin": [
+    [
+      "./.opencode/plugins/bounded-lite.ts",
+      {
+        "mode": "full",
+        "configDir": "C:\\path\\to\\oh-my-lite-openagent",
+        "taskLeadProfiles": {
+          "visual": { "model": "aiwanwu/gpt-5.4" },
+          "code": { "model": "aiwanwu/gpt-5.4" },
+          "quick": { "model": "aiwanwu/gpt-5.4-mini" },
+          "research": { "model": "aiwanwu/gpt-5.4-mini" },
+          "writing": { "model": "aiwanwu/gpt-5.4" },
+          "deep": { "model": "aiwanwu/gpt-5.4" },
+          "risk-high": { "model": "aiwanwu/gpt-5.4" }
+        }
+      }
+    ]
+  ],
+>>>>>>> 097f5c5 (agent-models bug版本，尚待修复):opencode.json
   "command": {
     "agent-models": {
       "description": "Import available OpenCode provider models, preview recommended per-role model/reasoning effort and Task Lead profile assignments, and apply them after user confirmation.",
       "agent": "command-lead",
-      "template": "Configure model assignments for Oh My Lite OpenAgent roles and Task Lead profiles.\n\n## Goal\n\nUse AI to recommend role models and Task Lead profile models from all available OpenCode model providers. The AI must not invent provider/model IDs.\n\nTask Lead profiles do not add new agents. They are selected from `plan.subtasks[].attributes` and provide dispatch metadata such as recommended model, fallback chain, and prompt guidance. Do not create new Task Lead agents. Current execution still uses the single hidden `task-lead` agent unless the runtime supports per-task model override.\n\n## Required Workflow\n\n1. Import the available model pool. By default this includes every discovered provider, including OpenCode subscription providers such as opencode and opencode-go. The current global model is context only and must not be used as a hard import filter.\n\n```\nbounded_lite_model_config({ action: \"import\" })\n```\n\n2. Ask the tool to show the usable imported model pool first, then generate recommended assignments. This is a preview only and must not write config.\n\n```\nbounded_lite_model_config({ action: \"auto\" })\n```\n\naction=auto is recommendation-only. It returns the available imported model pool before role recommendations and Task Lead profile recommendations, including `Recommended Task Lead profile assignments JSON`.\n\n3. Show the available model pool, then the recommended role assignments and Task Lead profile assignments to the user, and ask whether they want changes. If the user wants changes, revise only by choosing model IDs returned by action=import/auto.\n\n4. Apply only after the user accepts the recommendations or gives modifications.\n\n```\nbounded_lite_model_config({\n  action: \"apply\",\n  assignments: {\n    \"command-lead\": \"provider/model\",\n    \"explore\": \"provider/model\"\n  },\n  taskLeadProfileAssignments: {\n    \"code\": \"provider/model\",\n    \"quick\": \"provider/model\",\n    \"visual\": \"provider/model\"\n  }\n})\n```\n\nYou may omit `assignments` or `taskLeadProfileAssignments` when there is nothing to change in that group.\n\n## Actions\n\n- import: Load the eligible provider model pool.\n- list: Show current role models, Task Lead profile models, and available provider models.\n- auto: Preview recommended role assignments and Task Lead profile assignments.\n- apply: Write accepted role assignments and/or Task Lead profile assignments.\n\n## Role Selection Guidance\n\n| Role              | Need                  | Selection guidance |\n|-------------------|-----------------------|--------------------|\n| command-lead      | Strongest reasoning   | strongest imported reasoning model |\n| plan-builder      | Strong planning       | strongest imported structured planning model |\n| deep-plan-builder | Detailed handoff plan | strong imported planning model; mandatory review compensates handoff risk |\n| task-lead         | Bounded execution     | capable imported implementation model used as the default/fallback executor |\n| explore           | Fast retrieval        | fast/cheap imported mini, flash, or highspeed model |\n| librarian         | Fast research         | fast/cheap imported mini, flash, or highspeed model |\n| plan-review       | Critical review       | strongest imported review model |\n| result-review     | Critical review       | strongest imported review model |\n\n## Task Lead Profile Guidance\n\n| Profile    | Attributes                         | Selection guidance |\n|------------|------------------------------------|--------------------|\n| quick      | quick                              | fastest low-cost model |\n| code       | code                               | strong bounded implementation model |\n| research   | research, docs                     | fast research / documentation lookup model |\n| writing    | writing                            | clear prose and documentation model |\n| visual     | multimodal, visual                 | model with visual or strong UI reasoning capability |\n| deep       | deep, large-context                | stronger long-context reasoning model |\n| risk-high  | risk-high, security, migration     | strong critical-reasoning model |\n\n## AI selection rule\n\n- Only choose model IDs returned by action=import or the imported pool used by action=auto.\n- After action=auto, ask the user whether they want to modify role or Task Lead profile recommendations before calling action=apply.\n- Do not create new Task Lead agents for profiles; profiles configure dispatch metadata for the single hidden task-lead agent.\n\nIf no provider models are found, tell the user to configure or connect OpenCode providers first."
+      "template": "Configure model assignments for Oh My Lite OpenAgent roles and Task Lead profiles.\n\n## Goal\n\nUse AI to recommend role models and Task Lead profile models from all available OpenCode model providers. The AI must not invent provider/model IDs.\n\nTask Lead profiles do not add new agents. They are selected from `plan.subtasks[].attributes` and provide dispatch metadata such as recommended model, fallback chain, and prompt guidance. Do not create new Task Lead agents. Current execution still uses the single hidden `task-lead` agent unless the runtime supports per-task model override.\n\n## Required Workflow\n\n1. Import the available model pool. By default this includes every discovered provider, including OpenCode subscription providers such as opencode and opencode-go. The current global model is context only and must not be used as a hard import filter.\n\n```\nbounded_lite_model_config({ action: \"import\" })\n```\n\n2. Ask the tool to show the usable imported model pool first, then generate recommended assignments. This is a preview only and must not write config.\n\n```\nbounded_lite_model_config({ action: \"auto\" })\n```\n\naction=auto is recommendation-only. It returns the available imported model pool before role recommendations and Task Lead profile recommendations, including `Recommended Task Lead profile assignments JSON`.\n\n3. Show the available model pool, then the recommended role assignments and Task Lead profile assignments to the user, and ask whether they want changes. If the user wants changes, revise only by choosing model IDs returned by action=import/auto.\n\n4. Apply only after the user accepts the recommendations or gives modifications.\n\n```\nbounded_lite_model_config({\n  action: \"apply\",\n  assignments: {\n    \"command-lead\": \"provider/model\",\n    \"explore\": \"provider/model\"\n  },\n  taskLeadProfileAssignments: {\n    \"code\": \"provider/model\",\n    \"quick\": \"provider/model\",\n    \"visual\": \"provider/model\"\n  }\n})\n```\n\nYou may omit `assignments` or `taskLeadProfileAssignments` when there is nothing to change in that group.\n\n## Actions\n\n- import: Load the eligible provider model pool.\n- list: Show current role models, Task Lead profile models, and available provider models.\n- auto: Preview recommended role assignments and Task Lead profile assignments.\n- apply: Write accepted role assignments and/or Task Lead profile assignments.\n\n## Role Selection Guidance\n\n| Role              | Need                  | Selection guidance |\n|-------------------|-----------------------|--------------------|\n| command-lead      | Strongest reasoning   | strongest imported reasoning model |\n| plan-builder      | Strong planning       | strongest imported structured planning model |\n| deep-plan-builder | Detailed handoff plan | strong imported planning model; mandatory review compensates handoff risk |\n| task-lead         | Bounded execution     | capable imported implementation model used as the default/fallback executor |\n| explore           | Fast retrieval        | fast/cheap imported mini, flash, or highspeed model |\n| librarian         | Fast research         | fast/cheap imported mini, flash, or highspeed model |\n| plan-review       | Critical review       | strongest imported review model |\n| result-review     | Critical review       | strongest imported review model |\n\n## Task Lead Profile Guidance\n\n| Profile    | Attributes                         | Selection guidance |\n|------------|------------------------------------|--------------------|\n| quick      | quick                              | fastest low-cost model |\n| code       | code                               | strong bounded implementation model |\n| research   | research, docs                     | fast research / documentation lookup model |\n| writing    | writing                            | clear prose and documentation model |\n| visual     | multimodal, visual                 | model with visual or strong UI reasoning capability |\n| deep       | deep, large-context                | stronger long-context reasoning model |\n| risk-high  | risk-high, security, migration     | strong critical-reasoning model |\n\n## AI selection rule\n\n- Only choose model IDs returned by action=import or the imported pool used by action=auto.\n- After action=auto, ask the user whether they want to modify role or Task Lead profile recommendations before calling action=apply.\n- Do not create new Task Lead agents for profiles; profiles configure dispatch metadata for the single hidden task-lead agent.\n- connect 之后，优先消费 runtime provider models。\n- 如果 runtime 不完整，再结合 auth.json 中 connected providers、models.dev，以及 opencode / opencode-go fallback 补全统一模型池。\n\nIf no provider models are found, tell the user to configure or connect OpenCode providers first."
     }
   },
   "permission": {

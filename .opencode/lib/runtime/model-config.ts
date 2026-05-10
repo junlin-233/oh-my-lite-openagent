@@ -61,6 +61,13 @@ export interface ProviderModel {
   origin?: ModelOrigin;
   reasoning?: boolean;
   variants?: string[];
+  connected?: boolean;
+  priorityScore?: number;
+}
+
+export interface DiscoveredModel extends ProviderModel {
+  connected: boolean;
+  priorityScore: number;
 }
 
 export type ModelProviderSource =
@@ -98,6 +105,15 @@ export interface ModelPoolPolicy {
 export interface InferredModelPoolPolicy {
   policy: ModelPoolPolicy;
   reason: string;
+}
+
+export interface DiscoveredModelPool {
+  connectedProviderIds: string[];
+  runtimeModels: DiscoveredModel[];
+  modelsDevModels: DiscoveredModel[];
+  credentialFallbackModels: DiscoveredModel[];
+  configuredModels: DiscoveredModel[];
+  models: DiscoveredModel[];
 }
 
 export interface ApplyModelConfigResult {
@@ -310,6 +326,37 @@ export function mergeProviderModels(
   return dedupeModels([...primary, ...fallback]);
 }
 
+export function buildDiscoveredModelPool(input: {
+  runtimeModels?: readonly ProviderModel[];
+  connectedProviderIds?: readonly string[];
+  modelsDevModels?: readonly ProviderModel[];
+  credentialFallbackModels?: readonly ProviderModel[];
+  configuredModels?: readonly ProviderModel[];
+}): DiscoveredModelPool {
+  const connectedProviderIds = [...new Set((input.connectedProviderIds ?? []).map((provider) => provider.trim()).filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right));
+  const connectedSet = new Set(connectedProviderIds.map((provider) => provider.toLowerCase()));
+  const runtimeModels = normalizeDiscoveredModels(input.runtimeModels ?? [], connectedSet);
+  const modelsDevModels = normalizeDiscoveredModels(input.modelsDevModels ?? [], connectedSet);
+  const credentialFallbackModels = normalizeDiscoveredModels(input.credentialFallbackModels ?? [], connectedSet);
+  const configuredModels = normalizeDiscoveredModels(input.configuredModels ?? [], connectedSet);
+  const models = dedupeModels([
+    ...runtimeModels,
+    ...modelsDevModels,
+    ...credentialFallbackModels,
+    ...configuredModels,
+  ]) as DiscoveredModel[];
+
+  return {
+    connectedProviderIds,
+    runtimeModels,
+    modelsDevModels,
+    credentialFallbackModels,
+    configuredModels,
+    models,
+  };
+}
+
 export function listKnownModelsForCredentialProviders(providerIds: readonly string[]): ProviderModel[] {
   const connectedProviders = new Set(providerIds.map((provider) => provider.toLowerCase()));
   const models: ProviderModel[] = [];
@@ -420,7 +467,7 @@ export function summarizeTaskLeadProfileModels(config: Record<string, unknown>):
 
   return DEFAULT_TASK_LEAD_PROFILES.map((profile) => {
     const rawConfigured = profileConfig[profile.name];
-    const configured: Record<string, unknown> = isRecord(rawConfigured) ? rawConfigured : {};
+    const configured = normalizeTaskLeadProfileConfigValue(rawConfigured);
     const configuredModel = typeof configured["model"] === "string" ? configured["model"] : undefined;
     const fallbackModels = readStringArray(configured["fallbackModels"]);
     const effectiveModel = configuredModel ?? taskLeadModel;
@@ -487,6 +534,8 @@ export function applyRoleModelConfig(
     const agent = ensureRecord(agents, role);
     const previous = typeof agent["model"] === "string" ? agent["model"] : undefined;
 
+    if (previous === model) continue;
+
     agent["model"] = model;
     changed.push({
       role: role as RoleName,
@@ -548,6 +597,8 @@ export function applyTaskLeadProfileModelConfig(
     const profile = ensureRecord(profiles, profileName);
     const previous = typeof profile["model"] === "string" ? profile["model"] : undefined;
 
+    if (previous === model) continue;
+
     profile["model"] = model;
     changed.push({
       profile: profileName,
@@ -582,6 +633,9 @@ export function applyRoleReasoningEffortConfig(
 
     const agent = ensureRecord(agents, role);
     const previous = readReasoningEffort(agent);
+
+    if (previous === effort) continue;
+
     agent["reasoningEffort"] = effort;
 
     changed.push({
@@ -753,9 +807,11 @@ export function formatModelImportReport(input: {
         ? input.models.map((model) => {
           const modelSource = model.source ?? classifyModelProvider(model.provider);
           const family = model.family ?? classifyModelFamily(model.id);
+          const origin = model.origin ? ` origin=${model.origin}` : "";
+          const connected = typeof model.connected === "boolean" ? ` connected=${model.connected}` : "";
           const reasoning = typeof model.reasoning === "boolean" ? ` reasoning=${model.reasoning}` : "";
           const variants = model.variants && model.variants.length > 0 ? ` variants=${model.variants.join(",")}` : "";
-          return `- ${model.id} [${modelSource}/${family}${reasoning}${variants}]`;
+          return `- ${model.id} [${modelSource}/${family}${origin}${connected}${reasoning}${variants}]`;
         })
         : ["- <none>"]
     ),
@@ -848,6 +904,49 @@ function withModelMetadata(model: ProviderModel): ProviderModel {
     source: model.source ?? classifyModelProvider(model.provider),
     family: model.family ?? classifyModelFamily(model.id),
   };
+}
+
+function normalizeTaskLeadProfileConfigValue(value: unknown): Record<string, unknown> {
+  if (typeof value === "string" && value.trim() !== "") {
+    return { model: value.trim() };
+  }
+
+  if (isRecord(value)) return value;
+
+  return {};
+}
+
+function normalizeDiscoveredModels(
+  models: readonly ProviderModel[],
+  connectedProviderIds: ReadonlySet<string>,
+): DiscoveredModel[] {
+  return models.map((model) => {
+    const withMetadata = withModelMetadata(model);
+    const connected = typeof withMetadata.connected === "boolean"
+      ? withMetadata.connected
+      : connectedProviderIds.has(withMetadata.provider.toLowerCase());
+
+    return {
+      ...withMetadata,
+      connected,
+      priorityScore: computeModelPriorityScore(withMetadata.origin, connected),
+    };
+  }) as DiscoveredModel[];
+}
+
+function computeModelPriorityScore(origin: ModelOrigin | undefined, connected: boolean): number {
+  const originScore = origin === "runtime-provider-list"
+    ? 500
+    : origin === "models-dev-fallback"
+      ? 300
+      : origin === "credential-provider-fallback"
+        ? 200
+        : origin === "configured-model"
+          ? 100
+          : origin === "opencode-json-provider"
+            ? 50
+            : 0;
+  return originScore + (connected ? 40 : 0);
 }
 
 function readProviderModelEntries(providerModels: unknown): Array<[string, unknown]> {
