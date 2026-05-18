@@ -38,6 +38,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { isKnownTaskLeadProfile } from "../lib/runtime/task-lead-profiles.js";
+import { tool } from "@opencode-ai/plugin/tool";
 
 const PLUGIN_FILE = "bounded-lite.ts";
 
@@ -483,6 +484,13 @@ interface ModelConfigResponse {
   report?: string;
 }
 
+function toToolOutput(value: unknown): { output: string; metadata: Record<string, unknown> } {
+  return {
+    output: typeof value === "string" ? value : JSON.stringify(value),
+    metadata: {},
+  };
+}
+
 function inferModelConfigAction(payload: unknown): ModelConfigAction {
   if (!isRecord(payload)) return "list";
   const action = payload["action"];
@@ -515,7 +523,19 @@ function collectChangedKeys(input: {
 function parseModelConfigError(error: unknown, action: ModelConfigAction): ModelConfigResponse {
   const message = error instanceof Error ? error.message : String(error);
   const match = message.match(/^(MODELCFG_ERR_[A-Z_]+):\s*(.*)$/);
-  if (!match) throw error;
+  if (!match) {
+    return {
+      ok: false,
+      action,
+      applied: false,
+      changed_keys: [],
+      validation_errors: [{
+        field: "runtime",
+        code: "MODELCFG_ERR_RUNTIME",
+        message,
+      }],
+    };
+  }
 
   const code = match[1] ?? "MODELCFG_ERR_INVALID_PAYLOAD";
   const details = match[2] ?? message;
@@ -613,42 +633,46 @@ export function createBoundedLitePlugin(
     tool: {
       bounded_lite_route: {
         description: "Resolve a bounded internal routing category to its target role.",
-        execute(args) {
+        args: {},
+        async execute(args) {
           const category = args["category"];
 
           if (!isRoutingCategory(category)) {
             throw new Error("Route tool requires a valid bounded routing category.");
           }
 
-          return resolveCategoryRoute(category);
+          return toToolOutput(resolveCategoryRoute(category));
         },
       },
       bounded_lite_plan_dag: {
         description: "Validate a required plan.subtasks payload and return bounded DAG waves plus dispatch profiles.",
-        execute(args) {
+        args: {},
+        async execute(args) {
           const payload = args["payload"];
           const dispatch = mergeTaskDispatchWithConfiguredProfiles(
             isRecord(args["dispatch"]) ? args["dispatch"] : {},
             options,
           );
 
-          return buildTaskDAG(payload, dispatch as Partial<TaskDispatchConfig>);
+          return toToolOutput(buildTaskDAG(payload, dispatch as Partial<TaskDispatchConfig>));
         },
       },
       bounded_lite_plan_readiness: {
         description: "Validate a Plan Builder artifact against readiness gates before Command Lead dispatches execution.",
-        execute(args) {
+        args: {},
+        async execute(args) {
           const payload = args["payload"];
           const dispatch = mergeTaskDispatchWithConfiguredProfiles(
             isRecord(args["dispatch"]) ? args["dispatch"] : {},
             options,
           );
 
-          return validatePlanReadiness(payload, dispatch as Partial<TaskDispatchConfig>);
+          return toToolOutput(validatePlanReadiness(payload, dispatch as Partial<TaskDispatchConfig>));
         },
       },
       bounded_lite_plan_artifact: {
         description: "Persist a Command Lead-approved plan artifact under .liteagent/plans and append .liteagent/plan-index.jsonl.",
+        args: {},
         async execute(args, context) {
           const action = readString(args["action"]) ?? "write";
           if (action !== "write") {
@@ -678,7 +702,7 @@ export function createBoundedLitePlugin(
             ...(requestedPath ? { requestedPath } : {}),
           });
 
-          return [
+          return toToolOutput([
             "Oh My Lite OpenAgent plan artifact persisted",
             "",
             `Plan ID: ${result.planId}`,
@@ -686,19 +710,21 @@ export function createBoundedLitePlugin(
             `Index: .liteagent/plan-index.jsonl`,
             `Bytes: ${result.bytes}`,
             `Overwritten: ${result.overwritten ? "yes" : "no"}`,
-          ].join("\n");
+          ].join("\n"));
         },
       },
       bounded_lite_background: {
         description: "List currently tracked background tasks from the bounded coordinator.",
-        execute() {
-          return background.list();
+        args: {},
+        async execute() {
+          return toToolOutput(background.list());
         },
       },
       bounded_lite_runtime_profile: {
         description: "Report the current runtime profile without creating a second control plane.",
-        execute() {
-          return runtimeProfile;
+        args: {},
+        async execute() {
+          return toToolOutput(runtimeProfile);
         },
       },
       bounded_lite_model_config: {
@@ -742,49 +768,15 @@ AI selection rule:
 
 If no provider models are found, tell the user to configure or connect OpenCode providers first.`,
         args: {
-          type: "object",
-          additionalProperties: false,
-          required: ["action"],
-          properties: {
-            action: {
-              type: "string",
-              enum: ["import", "list", "auto", "apply"],
-            },
-            assignments: {
-              type: "object",
-              additionalProperties: { type: "string" },
-            },
-            reasoningEffortAssignments: {
-              type: "object",
-              additionalProperties: {
-                type: "string",
-                enum: ["minimal", "low", "medium", "high"],
-              },
-            },
-            taskLeadProfileAssignments: {
-              type: "object",
-              additionalProperties: { type: "string" },
-            },
-            policy: {
-              type: "object",
-              additionalProperties: true,
-            },
-            source: {
-              type: "string",
-              enum: ["all", "opencode-subscription", "api-provider", "gateway", "unknown"],
-            },
-            providerPreference: {
-              type: "array",
-              items: { type: "string" },
-            },
-            familyPreference: {
-              type: "array",
-              items: { type: "string" },
-            },
-            allowCodexBackend: {
-              type: "boolean",
-            },
-          },
+          action: tool.schema.enum(["import", "list", "auto", "apply"]),
+          assignments: tool.schema.record(tool.schema.string(), tool.schema.unknown()).optional(),
+          reasoningEffortAssignments: tool.schema.record(tool.schema.string(), tool.schema.unknown()).optional(),
+          taskLeadProfileAssignments: tool.schema.record(tool.schema.string(), tool.schema.unknown()).optional(),
+          policy: tool.schema.record(tool.schema.string(), tool.schema.unknown()).optional(),
+          source: tool.schema.string().optional(),
+          providerPreference: tool.schema.array(tool.schema.string()).optional(),
+          familyPreference: tool.schema.array(tool.schema.string()).optional(),
+          allowCodexBackend: tool.schema.boolean().optional(),
         },
         async execute(args, context) {
           const fallbackAction = inferModelConfigAction(args);
@@ -814,7 +806,7 @@ If no provider models are found, tell the user to configure or connect OpenCode 
             const importedPool = importModelPool(models, poolPolicy);
 
             if (action === "import") {
-              return {
+              return toToolOutput({
                 ok: true,
                 action,
                 applied: false,
@@ -828,7 +820,7 @@ If no provider models are found, tell the user to configure or connect OpenCode 
                     policy: poolPolicy,
                   }),
                 ].join("\n"),
-              } satisfies ModelConfigResponse;
+              } satisfies ModelConfigResponse);
             }
 
             if (action === "list") {
@@ -866,7 +858,7 @@ If no provider models are found, tell the user to configure or connect OpenCode 
                   models,
                 });
 
-              return {
+              return toToolOutput({
                 ok: true,
                 action,
                 applied: false,
@@ -875,7 +867,7 @@ If no provider models are found, tell the user to configure or connect OpenCode 
                 role_assignments: roleAssignments,
                 profile_assignments: profileAssignments,
                 report,
-              } satisfies ModelConfigResponse;
+              } satisfies ModelConfigResponse);
             }
 
             if (action === "auto") {
@@ -906,7 +898,7 @@ If no provider models are found, tell the user to configure or connect OpenCode 
                   formatTaskLeadProfileModelReport(profileAutoResult),
                 ].join("\n");
 
-              return {
+              return toToolOutput({
                 ok: true,
                 action,
                 applied: false,
@@ -921,7 +913,7 @@ If no provider models are found, tell the user to configure or connect OpenCode 
                 profile_assignments: profileAutoResult.assignments,
                 reasoning_effort_assignments: reasoningEffortAssignments,
                 report,
-              } satisfies ModelConfigResponse;
+              } satisfies ModelConfigResponse);
             }
 
             if (action === "apply") {
@@ -940,7 +932,7 @@ If no provider models are found, tell the user to configure or connect OpenCode 
                 !Array.isArray(taskLeadProfileAssignments);
 
               if (!hasRoleAssignments && !hasProfileAssignments && !hasReasoningAssignments) {
-                return {
+                return toToolOutput({
                   ok: false,
                   action,
                   applied: false,
@@ -950,7 +942,7 @@ If no provider models are found, tell the user to configure or connect OpenCode 
                     code: "MODELCFG_ERR_INVALID_PAYLOAD",
                     message: "bounded_lite_model_config apply requires assignments, reasoningEffortAssignments, or taskLeadProfileAssignments.",
                   }],
-                } satisfies ModelConfigResponse;
+                } satisfies ModelConfigResponse);
               }
 
               const hasAnyDiscoveredPoolSource =
@@ -962,7 +954,7 @@ If no provider models are found, tell the user to configure or connect OpenCode 
                 configModels.length > 0;
 
               if ((hasRoleAssignments || hasProfileAssignments) && !hasAnyDiscoveredPoolSource) {
-                return {
+                return toToolOutput({
                   ok: false,
                   action,
                   applied: false,
@@ -972,7 +964,7 @@ If no provider models are found, tell the user to configure or connect OpenCode 
                     code: "MODELCFG_ERR_POOL_UNAVAILABLE",
                     message: "unable to build a model pool for apply.",
                   }],
-                } satisfies ModelConfigResponse;
+                } satisfies ModelConfigResponse);
               }
 
               const result = hasRoleAssignments ? applyRoleModelConfig(
@@ -1019,7 +1011,7 @@ If no provider models are found, tell the user to configure or connect OpenCode 
                 ...reasoningResult.skipped.map((item) => `${item.role}: ${item.reason}`),
               ];
 
-              return {
+              return toToolOutput({
                 ok: true,
                 action,
                 applied: changedKeys.length > 0,
@@ -1058,12 +1050,12 @@ If no provider models are found, tell the user to configure or connect OpenCode 
                   "",
                   `Updated ${configPath}. Restart OpenCode or start a new session if the active TUI keeps old model state.`,
                 ].join("\n"),
-              } satisfies ModelConfigResponse;
+              } satisfies ModelConfigResponse);
             }
 
             throw new Error("MODELCFG_ERR_UNKNOWN_ACTION: action must be import, list, auto, or apply.");
           } catch (error) {
-            return parseModelConfigError(error, fallbackAction);
+            return toToolOutput(parseModelConfigError(error, fallbackAction));
           }
         },
       },
@@ -1074,6 +1066,14 @@ If no provider models are found, tell the user to configure or connect OpenCode 
       }
     },
     "tool.execute.before"(input, output) {
+      if (input.tool === "task" && isRecord(output.args)) {
+        const command = readString(output.args["command"]);
+        const prompt = readString(output.args["prompt"]);
+        if (command === "/agent-models" || prompt === "/agent-models") {
+          throw new Error("/agent-models must be executed directly by command-lead; task delegation is forbidden.");
+        }
+      }
+
       if (input.tool === "bounded_lite_route") {
         output.args = { ...output.args };
       }
