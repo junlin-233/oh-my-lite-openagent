@@ -65,6 +65,15 @@ export interface ProviderModel {
   priorityScore?: number;
 }
 
+type ModelSanitizeContext =
+  | "runtime-provider-list"
+  | "models-dev-fallback"
+  | "credential-provider-fallback"
+  | "configured-model"
+  | "opencode-json-provider"
+  | "merge"
+  | "metadata";
+
 export interface DiscoveredModel extends ProviderModel {
   connected: boolean;
   priorityScore: number;
@@ -264,7 +273,7 @@ export function listProviderModels(config: Record<string, unknown>): ProviderMod
     }
   }
 
-  return models.sort((left, right) => left.id.localeCompare(right.id));
+  return sanitizeProviderModels(models, "configured-model");
 }
 
 export function listProviderModelsFromResponse(
@@ -304,7 +313,7 @@ export function listProviderModelsFromResponse(
     }
   }
 
-  return dedupeModels(models);
+  return sanitizeProviderModels(models, origin);
 }
 
 export function listProviderModelsFromModelsDevResponse(
@@ -323,7 +332,7 @@ export function mergeProviderModels(
   primary: readonly ProviderModel[],
   fallback: readonly ProviderModel[],
 ): ProviderModel[] {
-  return dedupeModels([...primary, ...fallback]);
+  return sanitizeProviderModels([...primary, ...fallback], "merge");
 }
 
 export function buildDiscoveredModelPool(input: {
@@ -392,6 +401,7 @@ export function importModelPool(
   models: readonly ProviderModel[],
   policy: ModelPoolPolicy = {},
 ): ProviderModel[] {
+  const sanitized = sanitizeProviderModels(models, "metadata");
   const source = policy.source ?? "all";
   const allowCodexBackend = policy.allowCodexBackend ?? false;
   const providerPreference = new Set(
@@ -399,7 +409,7 @@ export function importModelPool(
   );
   const familyPreference = new Set(policy.familyPreference ?? []);
 
-  return dedupeModels(models.map(withModelMetadata).filter((model) => {
+  return dedupeModels(sanitized.map(withModelMetadata).filter((model) => {
     if (source !== "all" && model.source !== source) return false;
     if (providerPreference.size > 0 && !providerPreference.has(model.provider.toLowerCase())) return false;
     if (familyPreference.size > 0 && !familyPreference.has(model.family ?? "other")) return false;
@@ -839,9 +849,10 @@ function ensureRecord(parent: Record<string, unknown>, key: string): Record<stri
 }
 
 function dedupeModels(models: readonly ProviderModel[]): ProviderModel[] {
+  const sanitized = sanitizeProviderModels(models, "metadata");
   const seen = new Map<string, ProviderModel>();
 
-  for (const model of models) {
+  for (const model of sanitized) {
     if (!seen.has(model.id)) seen.set(model.id, model);
   }
 
@@ -899,10 +910,21 @@ export function isCodexModel(model: ProviderModel): boolean {
 }
 
 function withModelMetadata(model: ProviderModel): ProviderModel {
+  const sanitized = sanitizeProviderModel(model);
+  if (!sanitized) {
+    return {
+      provider: "unknown",
+      model: "unknown",
+      id: "unknown/unknown",
+      source: "unknown",
+      family: "other",
+    };
+  }
+
   return {
-    ...model,
-    source: model.source ?? classifyModelProvider(model.provider),
-    family: model.family ?? classifyModelFamily(model.id),
+    ...sanitized,
+    source: sanitized.source ?? classifyModelProvider(sanitized.provider),
+    family: sanitized.family ?? classifyModelFamily(sanitized.id),
   };
 }
 
@@ -920,7 +942,7 @@ function normalizeDiscoveredModels(
   models: readonly ProviderModel[],
   connectedProviderIds: ReadonlySet<string>,
 ): DiscoveredModel[] {
-  return models.map((model) => {
+  return sanitizeProviderModels(models, "metadata").map((model) => {
     const withMetadata = withModelMetadata(model);
     const connected = typeof withMetadata.connected === "boolean"
       ? withMetadata.connected
@@ -932,6 +954,46 @@ function normalizeDiscoveredModels(
       priorityScore: computeModelPriorityScore(withMetadata.origin, connected),
     };
   }) as DiscoveredModel[];
+}
+
+function sanitizeProviderModels(
+  models: readonly ProviderModel[],
+  _context: ModelSanitizeContext,
+): ProviderModel[] {
+  const sanitized: ProviderModel[] = [];
+
+  for (const model of models) {
+    const next = sanitizeProviderModel(model);
+    if (!next) continue;
+    sanitized.push(next);
+  }
+
+  return dedupeRawModels(sanitized);
+}
+
+function sanitizeProviderModel(model: ProviderModel | unknown): ProviderModel | undefined {
+  if (!isRecord(model)) return undefined;
+
+  const provider = typeof model["provider"] === "string" ? model["provider"].trim() : "";
+  const modelName = typeof model["model"] === "string" ? model["model"].trim() : "";
+  const id = typeof model["id"] === "string" ? model["id"].trim() : "";
+
+  if (!provider || !modelName || !id) return undefined;
+
+  return {
+    ...model,
+    provider,
+    model: modelName,
+    id,
+  } as ProviderModel;
+}
+
+function dedupeRawModels(models: readonly ProviderModel[]): ProviderModel[] {
+  const seen = new Map<string, ProviderModel>();
+  for (const model of models) {
+    if (!seen.has(model.id)) seen.set(model.id, model);
+  }
+  return [...seen.values()].sort((left, right) => left.id.localeCompare(right.id));
 }
 
 function computeModelPriorityScore(origin: ModelOrigin | undefined, connected: boolean): number {

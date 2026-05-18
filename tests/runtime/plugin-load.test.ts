@@ -3,13 +3,16 @@ import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-async function pathExists(filePath: string): Promise<boolean> {
-  try {
-    await access(filePath);
-    return true;
-  } catch {
-    return false;
+async function execModelConfig(
+  hooks: ReturnType<typeof createBoundedLitePlugin>,
+  args: Record<string, unknown>,
+  context: any,
+): Promise<any> {
+  const raw = await hooks.tool?.bounded_lite_model_config?.execute(args, context);
+  if (raw && typeof raw === "object" && "output" in raw && typeof (raw as { output?: unknown }).output === "string") {
+    return JSON.parse((raw as { output: string }).output);
   }
+  return raw;
 }
 
 describe("plugin safety", () => {
@@ -71,6 +74,31 @@ describe("plugin safety", () => {
     expect(planOutput.status).toBe("allow");
   });
 
+  it("declares bounded_lite_model_config action argument in tool schema", async () => {
+    const hooks = await Promise.resolve(
+      createBoundedLitePlugin({
+        directory: process.cwd(),
+      }),
+    );
+
+    const args = hooks.tool?.bounded_lite_model_config?.args as Record<string, unknown> | undefined;
+    expect(args).toBeTruthy();
+    expect(args && "action" in args).toBe(true);
+  });
+
+  it("blocks task delegation for /agent-models in tool.execute.before", async () => {
+    const hooks = await Promise.resolve(
+      createBoundedLitePlugin({
+        directory: process.cwd(),
+      }),
+    );
+
+    expect(() => hooks["tool.execute.before"]?.(
+      { tool: "task", args: { command: "/agent-models", prompt: "/agent-models" } },
+      { args: { command: "/agent-models", prompt: "/agent-models" } },
+    )).toThrow("/agent-models must be executed directly by command-lead");
+  });
+
   it("returns JSON auto recommendations with imported model pool", async () => {
     const configDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-models-"));
 
@@ -81,7 +109,8 @@ describe("plugin safety", () => {
         { directory: process.cwd() },
         { configDir },
       );
-      const output = await hooks.tool?.bounded_lite_model_config?.execute(
+      const output = await execModelConfig(
+        hooks,
         { action: "auto" },
         {
           directory: process.cwd(),
@@ -144,7 +173,8 @@ describe("plugin safety", () => {
         { directory: configDir },
         { configDir },
       );
-      await hooks.tool?.bounded_lite_model_config?.execute(
+      await execModelConfig(
+        hooks,
         {
           action: "apply",
           taskLeadProfileAssignments: {
@@ -154,7 +184,7 @@ describe("plugin safety", () => {
         },
         { directory: configDir },
       );
-      const output = await hooks.tool?.bounded_lite_model_config?.execute({ action: "list" }, { directory: configDir }) as {
+      const output = await execModelConfig(hooks, { action: "list" }, { directory: configDir }) as {
         profile_assignments?: Record<string, string>;
       };
 
@@ -167,7 +197,7 @@ describe("plugin safety", () => {
 
   it("returns missing action validation error for empty payload", async () => {
     const hooks = createBoundedLitePlugin({ directory: process.cwd() });
-    const output = await hooks.tool?.bounded_lite_model_config?.execute({}, { directory: process.cwd() }) as {
+    const output = await execModelConfig(hooks, {}, { directory: process.cwd() }) as {
       ok: boolean;
       validation_errors?: Array<{ code: string }>;
     };
@@ -178,7 +208,8 @@ describe("plugin safety", () => {
 
   it("returns unknown action validation error for invalid action", async () => {
     const hooks = createBoundedLitePlugin({ directory: process.cwd() });
-    const output = await hooks.tool?.bounded_lite_model_config?.execute(
+    const output = await execModelConfig(
+      hooks,
       { action: "noop" },
       { directory: process.cwd() },
     ) as {
@@ -192,7 +223,8 @@ describe("plugin safety", () => {
 
   it("returns unknown field validation error for strict top-level payload", async () => {
     const hooks = createBoundedLitePlugin({ directory: process.cwd() });
-    const output = await hooks.tool?.bounded_lite_model_config?.execute(
+    const output = await execModelConfig(
+      hooks,
       { action: "list", confirm: true },
       { directory: process.cwd() },
     ) as {
@@ -207,15 +239,18 @@ describe("plugin safety", () => {
   it("returns invalid payload validation error for non-object payload", async () => {
     const hooks = createBoundedLitePlugin({ directory: process.cwd() });
     const outputs = await Promise.all([
-      hooks.tool?.bounded_lite_model_config?.execute(
+      execModelConfig(
+        hooks,
         null as unknown as Record<string, unknown>,
         { directory: process.cwd() },
       ),
-      hooks.tool?.bounded_lite_model_config?.execute(
+      execModelConfig(
+        hooks,
         "list" as unknown as Record<string, unknown>,
         { directory: process.cwd() },
       ),
-      hooks.tool?.bounded_lite_model_config?.execute(
+      execModelConfig(
+        hooks,
         [] as unknown as Record<string, unknown>,
         { directory: process.cwd() },
       ),
@@ -247,7 +282,8 @@ describe("plugin safety", () => {
         { configDir },
       );
 
-      await hooks.tool?.bounded_lite_model_config?.execute(
+      await execModelConfig(
+        hooks,
         {
           action: "apply",
           taskLeadProfileAssignments: {
@@ -257,7 +293,7 @@ describe("plugin safety", () => {
         { directory: configDir },
       );
 
-      const output = await hooks.tool?.bounded_lite_model_config?.execute({ action: "list" }, { directory: configDir }) as {
+      const output = await execModelConfig(hooks, { action: "list" }, { directory: configDir }) as {
         profile_assignments?: Record<string, string>;
       };
       expect(output.profile_assignments?.quick).toBe("openai/gpt-5.4-mini");
@@ -276,7 +312,8 @@ describe("plugin safety", () => {
         { directory: process.cwd() },
         { configDir },
       );
-      const output = await hooks.tool?.bounded_lite_model_config?.execute(
+      const output = await execModelConfig(
+        hooks,
         {
           action: "import",
           policy: {
@@ -303,7 +340,8 @@ describe("plugin safety", () => {
         { directory: process.cwd() },
         { configDir },
       );
-      const output = await hooks.tool?.bounded_lite_model_config?.execute(
+      const output = await execModelConfig(
+        hooks,
         {
           action: "auto",
           familyPreference: ["gpt"],
@@ -327,7 +365,8 @@ describe("plugin safety", () => {
         { directory: process.cwd() },
         { configDir },
       );
-      const output = await hooks.tool?.bounded_lite_model_config?.execute(
+      const output = await execModelConfig(
+        hooks,
         {
           action: "import",
           source: "all",
@@ -352,7 +391,8 @@ describe("plugin safety", () => {
         { directory: process.cwd() },
         { configDir },
       );
-      const output = await hooks.tool?.bounded_lite_model_config?.execute(
+      const output = await execModelConfig(
+        hooks,
         {
           action: "import",
           allowCodexBackend: true,
@@ -390,7 +430,8 @@ describe("plugin safety", () => {
         { configDir },
       );
 
-      const output = await hooks.tool?.bounded_lite_model_config?.execute(
+      const output = await execModelConfig(
+        hooks,
         {
           action: "apply",
           assignments: {
@@ -431,7 +472,8 @@ describe("plugin safety", () => {
       }, null, 2)}\n`);
 
       const hooks = createBoundedLitePlugin({ directory: process.cwd() }, { configDir });
-      const output = await hooks.tool?.bounded_lite_model_config?.execute(
+      const output = await execModelConfig(
+        hooks,
         {
           action: "apply",
           assignments: {
@@ -480,7 +522,8 @@ describe("plugin safety", () => {
         { configDir },
       );
 
-      const output = await hooks.tool?.bounded_lite_model_config?.execute(
+      const output = await execModelConfig(
+        hooks,
         {
           action: "apply",
           assignments: {
@@ -518,12 +561,14 @@ describe("plugin safety", () => {
       }, null, 2)}\n`);
 
       const hooks = createBoundedLitePlugin({ directory: process.cwd() }, { configDir });
-      await hooks.tool?.bounded_lite_model_config?.execute(
+      await execModelConfig(
+        hooks,
         { action: "apply", assignments: { "command-lead": "openai/gpt-5.4" } },
         { directory: process.cwd() },
       );
 
-      const second = await hooks.tool?.bounded_lite_model_config?.execute(
+      const second = await execModelConfig(
+        hooks,
         { action: "apply", assignments: { "command-lead": "openai/gpt-5.4" } },
         { directory: process.cwd() },
       ) as { ok: boolean; action: string; applied: boolean; changed_keys?: string[] };
@@ -552,13 +597,15 @@ describe("plugin safety", () => {
       }, null, 2)}\n`);
 
       const hooks = createBoundedLitePlugin({ directory: process.cwd() }, { configDir });
-      const autoPreview = await hooks.tool?.bounded_lite_model_config?.execute(
+      const autoPreview = await execModelConfig(
+        hooks,
         { action: "auto" },
         { directory: process.cwd() },
       ) as { recommendations?: { roles?: Record<string, string> } };
 
       expect(autoPreview.recommendations?.roles).toBeTruthy();
-      const listed = await hooks.tool?.bounded_lite_model_config?.execute(
+      const listed = await execModelConfig(
+        hooks,
         { action: "list" },
         { directory: process.cwd() },
       ) as { role_assignments?: Record<string, string> };
@@ -586,26 +633,29 @@ describe("plugin safety", () => {
       }, null, 2)}\n`);
 
       const hooks = createBoundedLitePlugin({ directory: process.cwd() }, { configDir });
-      const imported = await hooks.tool?.bounded_lite_model_config?.execute({ action: "import" }, { directory: process.cwd() }) as {
+      const imported = await execModelConfig(hooks, { action: "import" }, { directory: process.cwd() }) as {
         ok: boolean;
         action: string;
       };
       expect(imported).toMatchObject({ ok: true, action: "import" });
 
-      const autoPreview = await hooks.tool?.bounded_lite_model_config?.execute(
+      const autoPreview = await execModelConfig(
+        hooks,
         { action: "auto" },
         { directory: process.cwd() },
       ) as { recommendations?: { roles?: Record<string, string> } };
       const roles = autoPreview.recommendations?.roles ?? {};
       expect(Object.keys(roles).length).toBeGreaterThan(0);
 
-      const apply = await hooks.tool?.bounded_lite_model_config?.execute(
+      const apply = await execModelConfig(
+        hooks,
         { action: "apply", assignments: roles },
         { directory: process.cwd() },
       ) as { ok: boolean; action: string };
       expect(apply).toMatchObject({ ok: true, action: "apply" });
 
-      const listed = await hooks.tool?.bounded_lite_model_config?.execute(
+      const listed = await execModelConfig(
+        hooks,
         { action: "list" },
         { directory: process.cwd() },
       ) as { role_assignments?: Record<string, string> };

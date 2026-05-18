@@ -50,6 +50,9 @@ describe("OpenCode agent topology", () => {
     expect(config.command?.["agent-models"]?.description).toContain("user confirmation");
     expect(config.command?.["agent-models"]?.template).toContain("bounded_lite_model_config");
     expect(config.command?.["agent-models"]?.template).toContain('action: "import"');
+    expect(config.command?.["agent-models"]?.template).toContain('action: "auto"');
+    expect(config.command?.["agent-models"]?.template).toContain('action: "apply"');
+    expect(config.command?.["agent-models"]?.template).toContain('action: "list"');
     expect(config.command?.["agent-models"]?.template).toContain(
       "includes every discovered provider",
     );
@@ -63,6 +66,12 @@ describe("OpenCode agent topology", () => {
     expect(config.command?.["agent-models"]?.template).toContain("taskLeadProfileAssignments");
     expect(config.command?.["agent-models"]?.template).toContain("Do not create new Task Lead agents");
     expect(config.command?.["agent-models"]?.template).toContain("ask whether they want changes");
+    expect(config.command?.["agent-models"]?.template).toContain("Execution owner must be command-lead");
+    expect(config.command?.["agent-models"]?.template).toContain("Do not delegate /agent-models execution to task or task-lead");
+    expect(config.command?.["agent-models"]?.template).toContain("Forbidden: `bounded_lite_model_config({})`");
+    expect(config.command?.["agent-models"]?.template).toContain("Forbidden: any call that omits `action`");
+    expect(config.command?.["agent-models"]?.template).toContain("MODELCFG_ERR_MISSING_ACTION");
+    expect(config.command?.["agent-models"]?.template).toContain("immediately retry with the intended explicit `action`");
     expect(JSON.stringify(config.plugin)).not.toContain('"multimodal": "');
   });
 
