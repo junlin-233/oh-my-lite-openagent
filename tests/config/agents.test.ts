@@ -1,19 +1,42 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
-const configPath = path.resolve(process.cwd(), "opencode.json");
-const config = JSON.parse(readFileSync(configPath, "utf8")) as {
+const managedConfigModule = await import(
+  pathToFileURL(path.resolve(process.cwd(), "scripts/managed-config.mjs")).href
+);
+const config = managedConfigModule.MANAGED_CONFIG as {
   default_agent?: string;
+  provider?: unknown;
+  model?: unknown;
+  small_model?: unknown;
   command?: Record<string, { agent?: string; template?: string; description?: string }>;
   agent: Record<
     string,
-    { mode: string; hidden?: boolean; description?: string; color?: string; prompt?: string }
+    {
+      mode: string;
+      hidden?: boolean;
+      description?: string;
+      color?: string;
+      prompt?: string;
+      model?: string;
+    }
   >;
 };
 
 describe("OpenCode agent topology", () => {
   it("starts OpenCode in the bounded command lead by default", () => {
     expect(config.default_agent).toBe("command-lead");
+  });
+
+  it("does not ship personalized provider or model configuration", () => {
+    expect(config.provider).toBeUndefined();
+    expect(config.model).toBeUndefined();
+    expect(config.small_model).toBeUndefined();
+
+    for (const [agentName, agent] of Object.entries(config.agent)) {
+      expect(agent.model, agentName).toBeUndefined();
+    }
   });
 
   it("registers a TUI command for role model configuration", () => {
@@ -151,12 +174,16 @@ describe("OpenCode agent topology", () => {
     const promptText = readPrompt("command-lead");
 
     expect(promptText).toContain("## Routing Thresholds");
+    expect(promptText).toContain("## Repository Evidence Gate");
+    expect(promptText).toContain("reading large files, comparing many files");
+    expect(promptText).toContain("gather scoped Explore evidence");
     expect(promptText).toContain("Execute directly when all of these are true");
     expect(promptText).toContain("Route to Plan Builder when any of these are true");
     expect(promptText).toContain("Route to Deep Plan Builder when any of these are true");
     expect(promptText).toContain("lower-strength model");
     expect(promptText).toContain("detailed plan artifact");
     expect(promptText).toContain("architecture invariants");
+    expect(promptText).toContain("Do not route to Deep Plan Builder merely for read-only architecture review");
     expect(promptText).toContain("Do not route to planning only because a task has several mechanical steps");
     expect(promptText).not.toContain("medium or larger");
   });
@@ -190,6 +217,12 @@ describe("OpenCode agent topology", () => {
   it("keeps Plan Builder aligned with the v2.1 plan spec", () => {
     const promptText = readPrompt("plan-builder");
 
+    expect(promptText).toContain("Match user's language");
+    expect(promptText).toContain("## Discussion Mode Output");
+    expect(promptText).toContain("Ask at most 3 high-value blocking questions");
+    expect(promptText).toContain("Do not emit full frontmatter");
+    expect(promptText).toContain("## Normalize Mode Output");
+    expect(promptText).toContain("Keep the skeleton proportional");
     expect(promptText).toContain("## Spec v2.1 Compliance");
     expect(promptText).toContain("plan_schema_version: 2.1");
     expect(promptText).toContain("maturity_level: M0|M1|M2|M3");
@@ -213,9 +246,18 @@ describe("OpenCode agent topology", () => {
   it("requires Deep Plan Builder to return a .liteagent plan path without owning persistence", () => {
     const promptText = readPrompt("deep-plan-builder");
 
+    expect(promptText).toContain("Match user's language");
     expect(promptText).toContain("recommended_plan_path");
     expect(promptText).toContain(".liteagent/plans/");
     expect(promptText).toContain("Command Lead owns actual file persistence");
+  });
+
+  it("requires Task Lead and reviewers to request scoped evidence when needed", () => {
+    expect(readPrompt("task-lead")).toContain("require scoped Explore evidence");
+    expect(readPrompt("task-lead")).toContain("required Explore evidence is missing");
+    expect(readPrompt("plan-review")).toContain("actively request scoped Explore evidence");
+    expect(readPrompt("plan-review")).toContain("without locatable evidence");
+    expect(readPrompt("result-review")).toContain("actively request scoped Explore evidence");
   });
 
   it("requires every delegating role to use the standard assignment fields", () => {

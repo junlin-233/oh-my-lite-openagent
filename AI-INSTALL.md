@@ -16,6 +16,18 @@ After installation, the user should be able to run `opencode` from any directory
 
 ## Step 1: Install
 
+This repository does not ship a root `opencode.json`. The installer merges only the plugin-managed config fragment from `scripts/managed-config.mjs`; user-specific provider, model, API key, unrelated plugin, and custom agent settings must remain in the user's own OpenCode config.
+
+If installing from npm or `npx`, warn the user that the downloaded npm package may lag behind the latest repository `main` branch. For the newest documented behavior, prefer the source install below or confirm the published version with `npm view oh-my-lite-openagent version`.
+
+Before running the installer, do this preflight check in the target OpenCode config directory:
+
+1. Resolve the config directory using this priority: `OPENCODE_CONFIG_DIR`, then `--config-dir` if the user supplies one, then the OpenCode platform default.
+2. Check for both `opencode.json` and `opencode.jsonc`.
+3. If both exist, `opencode.json` is the active merge target and `opencode.jsonc` is left untouched.
+4. If only `opencode.jsonc` exists, the installer must merge into `opencode.jsonc` and must not create a new `opencode.json`.
+5. If neither exists, the installer may create `opencode.json`.
+
 ```bash
 git clone https://github.com/junlin-233/oh-my-lite-openagent.git
 cd oh-my-lite-openagent
@@ -116,8 +128,11 @@ Each role should have a `model` field with the best available `provider/model` a
 - Preserve API keys and never print them.
 - Preserve unrelated plugins.
 - Preserve custom agents.
+- Preserve the existing OpenCode config filename when possible: update `opencode.jsonc` when it is the only existing config file.
 - Do not overwrite the whole OpenCode config.
+- Do not silently create `opencode.json` when the user already has only `opencode.jsonc`.
 - Do not delete user files.
+- Role bash permissions default to `allow` for ordinary commands and `ask` for dangerous or sensitive commands such as destructive file operations, privileged system commands, git history/remote mutations, npm publishing/removal/versioning, real installer writes, and download-then-execute patterns. The disabled built-in `build` and `plan` overrides remain fully denied.
 
 ## If Something Fails
 
@@ -136,6 +151,7 @@ If OpenCode reports invalid permission config, check:
 
 - `webfetch` and `websearch` must be scalar strings like `"allow"` or `"deny"`.
 - Task catch-all deny rules must come before specific allow rules.
+- Bash catch-all allow rules must come before specific ask rules, because OpenCode uses last matching rule wins.
 
 If the plugin only works inside this repository, rerun:
 

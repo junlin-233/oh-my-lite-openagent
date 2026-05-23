@@ -33,7 +33,7 @@ import {
   summarizeRoleModels,
   summarizeTaskLeadProfileModels,
 } from "../lib/runtime/model-config.js";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -130,6 +130,117 @@ function readStringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === "string" && item.trim() !== "")
     : [];
+}
+
+function stripJsonComments(content: string): string {
+  let output = "";
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < content.length; index += 1) {
+    const char = content[index];
+    const next = content[index + 1];
+
+    if (inString) {
+      output += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+      output += char;
+      continue;
+    }
+
+    if (char === "/" && next === "/") {
+      while (index < content.length && content[index] !== "\n") index += 1;
+      output += "\n";
+      continue;
+    }
+
+    if (char === "/" && next === "*") {
+      index += 2;
+      while (index < content.length && !(content[index] === "*" && content[index + 1] === "/")) {
+        output += content[index] === "\n" ? "\n" : " ";
+        index += 1;
+      }
+      index += 1;
+      continue;
+    }
+
+    output += char;
+  }
+
+  return output;
+}
+
+function stripTrailingCommas(content: string): string {
+  let output = "";
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < content.length; index += 1) {
+    const char = content[index];
+
+    if (inString) {
+      output += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+      output += char;
+      continue;
+    }
+
+    if (char === ",") {
+      let lookahead = index + 1;
+      while (/\s/.test(content[lookahead] ?? "")) lookahead += 1;
+      if (content[lookahead] === "}" || content[lookahead] === "]") continue;
+    }
+
+    output += char;
+  }
+
+  return output;
+}
+
+function parseJsonConfig(content: string): Record<string, unknown> {
+  return JSON.parse(stripTrailingCommas(stripJsonComments(content.replace(/^\uFEFF/, "")))) as Record<string, unknown>;
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    const info = await stat(filePath);
+    return info.isFile();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+async function resolveOpenCodeConfigPath(configDir?: string): Promise<string> {
+  const directory = defaultConfigDir(configDir);
+  const jsonPath = path.join(directory, "opencode.json");
+  const jsoncPath = path.join(directory, "opencode.jsonc");
+
+  if (await fileExists(jsonPath)) return jsonPath;
+  if (await fileExists(jsoncPath)) return jsoncPath;
+  return jsonPath;
 }
 
 function isBoundedLitePluginSpec(spec: unknown): boolean {
@@ -267,9 +378,9 @@ function mergeTaskDispatchWithConfiguredProfiles(
 }
 
 async function readOpenCodeConfig(configDir?: string): Promise<Record<string, unknown>> {
-  const configPath = path.join(defaultConfigDir(configDir), "opencode.json");
+  const configPath = await resolveOpenCodeConfigPath(configDir);
   const content = await readFile(configPath, "utf8");
-  return JSON.parse(content) as Record<string, unknown>;
+  return parseJsonConfig(content);
 }
 
 async function readOpenCodeAuthProviderIds(): Promise<string[]> {
@@ -283,7 +394,7 @@ async function readOpenCodeAuthProviderIds(): Promise<string[]> {
 }
 
 async function writeOpenCodeConfig(config: Record<string, unknown>, configDir?: string): Promise<string> {
-  const configPath = path.join(defaultConfigDir(configDir), "opencode.json");
+  const configPath = await resolveOpenCodeConfigPath(configDir);
   await mkdir(path.dirname(configPath), { recursive: true });
   await writeFile(`${configPath}.bak`, `${JSON.stringify(await readOpenCodeConfig(configDir), null, 2)}\n`);
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);

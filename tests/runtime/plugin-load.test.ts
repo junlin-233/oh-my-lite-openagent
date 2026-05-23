@@ -1,7 +1,16 @@
 import { createBoundedLitePlugin } from "../../.opencode/plugins/bounded-lite.js";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 describe("plugin safety", () => {
   it("loads without touching the client during initialization", async () => {
@@ -100,6 +109,47 @@ describe("plugin safety", () => {
       expect(String(output)).toContain("openai/gpt-5.4");
       expect(String(output).indexOf("Available imported model pool (review before recommendations):"))
         .toBeLessThan(String(output).indexOf("Oh My Lite OpenAgent auto model configuration"));
+    } finally {
+      await rm(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it("writes model config updates back to opencode.jsonc when that is the existing config", async () => {
+    const configDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-plugin-jsonc-"));
+
+    try {
+      const jsoncPath = path.join(configDir, "opencode.jsonc");
+      await writeFile(
+        jsoncPath,
+        `{
+          // Existing JSONC config.
+          "agent": {
+            "command-lead": {},
+          },
+        }\n`,
+      );
+
+      const hooks = createBoundedLitePlugin(
+        { directory: process.cwd() },
+        { configDir },
+      );
+      const output = await hooks.tool?.bounded_lite_model_config?.execute(
+        {
+          action: "apply",
+          assignments: { "command-lead": "openai/gpt-5.4" },
+          allowUnavailableModels: true,
+        },
+        {
+          directory: process.cwd(),
+          client: {},
+        },
+      );
+      const writtenConfig = JSON.parse(await readFile(jsoncPath, "utf8"));
+
+      expect(String(output)).toContain(`Updated ${jsoncPath}`);
+      expect(writtenConfig.agent["command-lead"].model).toBe("openai/gpt-5.4");
+      expect(await pathExists(path.join(configDir, "opencode.json"))).toBe(false);
+      expect(await pathExists(`${jsoncPath}.bak`)).toBe(true);
     } finally {
       await rm(configDir, { recursive: true, force: true });
     }

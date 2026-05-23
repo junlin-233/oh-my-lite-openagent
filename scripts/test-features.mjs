@@ -11,7 +11,7 @@
  * 测试内容：
  *   1. 角色模型推荐引擎 (resolveAutoModels 核心逻辑)
  *   2. 安装器脚本结构验证
- *   3. opencode.json 和插件完整性
+ *   3. managed config 和插件完整性
  *   4. install.mjs --dry-run
  */
 
@@ -19,6 +19,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { pathToFileURL } from "node:url";
+import { MANAGED_CONFIG } from "./managed-config.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -200,13 +201,13 @@ function testInstallerStructure() {
 }
 
 // ============================================================================
-// 3. opencode.json 和插件完整性
+// 3. managed config 和插件完整性
 // ============================================================================
 
 function testConfigIntegrity() {
-  section("3. opencode.json 和插件完整性");
+  section("3. managed config 和插件完整性");
 
-  const config = JSON.parse(readFileSync(path.join(ROOT, "opencode.json"), "utf8"));
+  const config = MANAGED_CONFIG;
 
   // 3.1 命令注册
   assert(config.command && config.command["agent-models"], "/agent-models 命令已注册");

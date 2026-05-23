@@ -4,6 +4,7 @@ import { createInterface } from "node:readline";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { MANAGED_CONFIG } from "./managed-config.mjs";
 
 const PLUGIN_FILE = "bounded-lite.ts";
 const MANAGED_DIRS = ["agents", "plugins", "lib"];
@@ -431,8 +432,9 @@ function formatModelAssignments(result) {
 // ---------------------------------------------------------------------------
 
 function parseArgs(argv) {
+  let cliConfigDir = undefined;
   const args = {
-    configDir: process.env.OPENCODE_CONFIG_DIR,
+    configDir: undefined,
     dryRun: false,
     interactive: false,
     rootDir: path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
@@ -454,7 +456,7 @@ function parseArgs(argv) {
     if (arg === "--config-dir") {
       const value = argv[index + 1];
       if (!value) throw new Error("--config-dir requires a path");
-      args.configDir = value;
+      cliConfigDir = value;
       index += 1;
       continue;
     }
@@ -470,6 +472,7 @@ function parseArgs(argv) {
     throw new Error(`Unknown argument: ${arg}`);
   }
 
+  args.configDir = process.env.OPENCODE_CONFIG_DIR ?? cliConfigDir;
   return args;
 }
 
@@ -489,11 +492,121 @@ function defaultConfigDir() {
 
 async function readJsonIfExists(filePath) {
   try {
-    return JSON.parse(await readFile(filePath, "utf8"));
+    return parseJsonConfig(await readFile(filePath, "utf8"));
   } catch (error) {
     if (error?.code === "ENOENT") return {};
-    throw new Error(`Failed to read JSON ${filePath}: ${error.message}`);
+    throw new Error(`Failed to read JSON/JSONC ${filePath}: ${error.message}`);
   }
+}
+
+function stripJsonComments(content) {
+  let output = "";
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < content.length; index += 1) {
+    const char = content[index];
+    const next = content[index + 1];
+
+    if (inString) {
+      output += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+      output += char;
+      continue;
+    }
+
+    if (char === "/" && next === "/") {
+      while (index < content.length && content[index] !== "\n") index += 1;
+      output += "\n";
+      continue;
+    }
+
+    if (char === "/" && next === "*") {
+      index += 2;
+      while (index < content.length && !(content[index] === "*" && content[index + 1] === "/")) {
+        output += content[index] === "\n" ? "\n" : " ";
+        index += 1;
+      }
+      index += 1;
+      continue;
+    }
+
+    output += char;
+  }
+
+  return output;
+}
+
+function stripTrailingCommas(content) {
+  let output = "";
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < content.length; index += 1) {
+    const char = content[index];
+
+    if (inString) {
+      output += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+      output += char;
+      continue;
+    }
+
+    if (char === ",") {
+      let lookahead = index + 1;
+      while (/\s/.test(content[lookahead] ?? "")) lookahead += 1;
+      if (content[lookahead] === "}" || content[lookahead] === "]") continue;
+    }
+
+    output += char;
+  }
+
+  return output;
+}
+
+function parseJsonConfig(content) {
+  return JSON.parse(stripTrailingCommas(stripJsonComments(content.replace(/^\uFEFF/, ""))));
+}
+
+async function fileExists(filePath) {
+  try {
+    const info = await stat(filePath);
+    return info.isFile();
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+async function resolveTargetConfigPath(configDir) {
+  const jsonPath = path.join(configDir, "opencode.json");
+  const jsoncPath = path.join(configDir, "opencode.jsonc");
+
+  if (await fileExists(jsonPath)) return jsonPath;
+  if (await fileExists(jsoncPath)) return jsoncPath;
+  return jsonPath;
 }
 
 async function copyDir(sourceDir, targetDir, dryRun) {
@@ -539,7 +652,7 @@ function isRecord(value) {
 
 function mergeManagedAgent(sourceAgent, existingAgent) {
   if (!isRecord(sourceAgent)) return sourceAgent;
-  if (!isRecord(existingAgent)) return sourceAgent;
+  if (!isRecord(existingAgent)) return { ...sourceAgent };
 
   return {
     ...sourceAgent,
@@ -647,8 +760,8 @@ export async function install(options = {}) {
   const configDir = path.resolve(options.configDir ?? defaultConfigDir());
   const dryRun = Boolean(options.dryRun);
   const interactive = Boolean(options.interactive);
-  const sourceConfig = await readJsonIfExists(path.join(rootDir, "opencode.json"));
-  const targetConfigPath = path.join(configDir, "opencode.json");
+  const sourceConfig = MANAGED_CONFIG;
+  const targetConfigPath = await resolveTargetConfigPath(configDir);
   const existingConfig = await readJsonIfExists(targetConfigPath);
   let mergedConfig = mergeConfig(existingConfig, sourceConfig, configDir);
   const sourceOpenCodeDir = path.join(rootDir, ".opencode");

@@ -1,226 +1,77 @@
-{
+const PERMISSIVE_BASH_PERMISSION = {
+  "*": "allow",
+  "rm": "ask",
+  "rm *": "ask",
+  "rmdir": "ask",
+  "rmdir *": "ask",
+  "mv": "ask",
+  "mv *": "ask",
+  "move": "ask",
+  "move *": "ask",
+  "cp -rf *": "ask",
+  "xcopy * /y": "ask",
+  "> *": "ask",
+  "git push": "ask",
+  "git push *": "ask",
+  "git commit": "ask",
+  "git commit *": "ask",
+  "git reset": "ask",
+  "git reset *": "ask",
+  "git clean": "ask",
+  "git clean *": "ask",
+  "git merge": "ask",
+  "git merge *": "ask",
+  "git rebase": "ask",
+  "git rebase *": "ask",
+  "git cherry-pick": "ask",
+  "git cherry-pick *": "ask",
+  "git stash drop": "ask",
+  "git stash drop *": "ask",
+  "git branch -D": "ask",
+  "git branch -D *": "ask",
+  "npm uninstall": "ask",
+  "npm uninstall *": "ask",
+  "npm remove": "ask",
+  "npm remove *": "ask",
+  "npm publish": "ask",
+  "npm publish *": "ask",
+  "npm version": "ask",
+  "npm version *": "ask",
+  "npm unpublish": "ask",
+  "npm unpublish *": "ask",
+  "npm run install:opencode": "ask",
+  "npm run install:opencode *": "ask",
+  "node scripts/install.mjs": "ask",
+  "node scripts/install.mjs *": "ask",
+  "node scripts/install.mjs --dry-run": "allow",
+  "node scripts/install.mjs --dry-run *": "allow",
+  "curl * | *": "ask",
+  "wget * | *": "ask",
+  "bash <(curl *)": "ask",
+  "bash <(wget *)": "ask",
+  "eval \"$(curl *)\"": "ask",
+  "eval \"$(wget *)\"": "ask",
+  "sudo": "ask",
+  "sudo *": "ask",
+  "su": "ask",
+  "su *": "ask",
+  "chmod": "ask",
+  "chmod *": "ask",
+  "chown": "ask",
+  "chown *": "ask",
+  "dd": "ask",
+  "dd *": "ask",
+  "mkfs": "ask",
+  "mkfs *": "ask",
+  "mount": "ask",
+  "mount *": "ask",
+  "umount": "ask",
+  "umount *": "ask"
+};
+
+export const MANAGED_CONFIG = {
   "$schema": "https://opencode.ai/config.json",
   "default_agent": "command-lead",
-  "provider": {
-    "aiwanwu": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "AIWanwu",
-      "options": {
-        "baseURL": "https://www.aiwanwu.cc/v1",
-        "apiKey": "YOUR_AIWANWU_API_KEY_HERE"
-      },
-      "models": {
-        "gpt-5-codex": {
-          "name": "GPT-5 Codex",
-          "limit": {
-            "context": 400000,
-            "output": 128000
-          },
-          "options": {
-            "store": false
-          },
-          "variants": {
-            "low": {},
-            "medium": {},
-            "high": {}
-          }
-        },
-        "gpt-5.1-codex": {
-          "name": "GPT-5.1 Codex",
-          "limit": {
-            "context": 400000,
-            "output": 128000
-          },
-          "options": {
-            "store": false
-          },
-          "variants": {
-            "low": {},
-            "medium": {},
-            "high": {}
-          }
-        },
-        "gpt-5.1-codex-max": {
-          "name": "GPT-5.1 Codex Max",
-          "limit": {
-            "context": 400000,
-            "output": 128000
-          },
-          "options": {
-            "store": false
-          },
-          "variants": {
-            "low": {},
-            "medium": {},
-            "high": {}
-          }
-        },
-        "gpt-5.1-codex-mini": {
-          "name": "GPT-5.1 Codex Mini",
-          "limit": {
-            "context": 400000,
-            "output": 128000
-          },
-          "options": {
-            "store": false
-          },
-          "variants": {
-            "low": {},
-            "medium": {},
-            "high": {}
-          }
-        },
-        "gpt-5.2": {
-          "name": "GPT-5.2",
-          "limit": {
-            "context": 400000,
-            "output": 128000
-          },
-          "options": {
-            "store": false
-          },
-          "variants": {
-            "low": {},
-            "medium": {},
-            "high": {},
-            "xhigh": {}
-          }
-        },
-        "gpt-5.4": {
-          "name": "GPT-5.4",
-          "limit": {
-            "context": 1050000,
-            "output": 128000
-          },
-          "options": {
-            "store": false
-          },
-          "variants": {
-            "low": {},
-            "medium": {},
-            "high": {},
-            "xhigh": {}
-          }
-        },
-        "gpt-5.4-mini": {
-          "name": "GPT-5.4 Mini",
-          "limit": {
-            "context": 400000,
-            "output": 128000
-          },
-          "options": {
-            "store": false
-          },
-          "variants": {
-            "low": {},
-            "medium": {},
-            "high": {},
-            "xhigh": {}
-          }
-        },
-        "gpt-5.4-nano": {
-          "name": "GPT-5.4 Nano",
-          "limit": {
-            "context": 400000,
-            "output": 128000
-          },
-          "options": {
-            "store": false
-          },
-          "variants": {
-            "low": {},
-            "medium": {},
-            "high": {},
-            "xhigh": {}
-          }
-        },
-        "gpt-5.3-codex-spark": {
-          "name": "GPT-5.3 Codex Spark",
-          "limit": {
-            "context": 128000,
-            "output": 32000
-          },
-          "options": {
-            "store": false
-          },
-          "variants": {
-            "low": {},
-            "medium": {},
-            "high": {},
-            "xhigh": {}
-          }
-        },
-        "gpt-5.3-codex": {
-          "name": "GPT-5.3 Codex",
-          "limit": {
-            "context": 400000,
-            "output": 128000
-          },
-          "options": {
-            "store": false
-          },
-          "variants": {
-            "low": {},
-            "medium": {},
-            "high": {},
-            "xhigh": {}
-          }
-        },
-        "gpt-5.2-codex": {
-          "name": "GPT-5.2 Codex",
-          "limit": {
-            "context": 400000,
-            "output": 128000
-          },
-          "options": {
-            "store": false
-          },
-          "variants": {
-            "low": {},
-            "medium": {},
-            "high": {},
-            "xhigh": {}
-          }
-        },
-        "codex-mini-latest": {
-          "name": "Codex Mini",
-          "limit": {
-            "context": 200000,
-            "output": 100000
-          },
-          "options": {
-            "store": false
-          },
-          "variants": {
-            "low": {},
-            "medium": {},
-            "high": {}
-          }
-        }
-      }
-    }
-  },
-  "model": "aiwanwu/gpt-5.4",
-  "small_model": "aiwanwu/gpt-5.4-mini",
-  "plugin": [
-    [
-      "./.opencode/plugins/bounded-lite.ts",
-      {
-        "mode": "full",
-        "configDir": "C:\\path\\to\\oh-my-lite-openagent",
-        "taskLeadProfiles": {
-          "visual": "aiwanwu/gpt-5.4",
-          "multimodal": "aiwanwu/gpt-5.4",
-          "code": "aiwanwu/gpt-5.4",
-          "quick": "aiwanwu/gpt-5.4-mini",
-          "research": "aiwanwu/gpt-5.4-mini",
-          "writing": "aiwanwu/gpt-5.4",
-          "deep": "aiwanwu/gpt-5.4",
-          "risk-high": "aiwanwu/gpt-5.4"
-        }
-      }
-    ]
-  ],
   "command": {
     "agent-models": {
       "description": "Import available OpenCode provider models, preview recommended per-role model/reasoning effort and Task Lead profile assignments, and apply them after user confirmation.",
@@ -235,6 +86,7 @@
       "*.env.*": "ask",
       ".env*": "ask",
       "**/opencode.json": "ask",
+      "**/opencode.jsonc": "ask",
       "**/package.json": "ask",
       "**/package-lock.json": "deny",
       "**/yarn.lock": "deny",
@@ -248,91 +100,7 @@
       "**/.opencode/**": "ask",
       "**/install.mjs": "ask"
     },
-    "bash": {
-      "*": "ask",
-      "git status": "allow",
-      "git status *": "allow",
-      "git diff": "allow",
-      "git diff *": "allow",
-      "git log": "allow",
-      "git log *": "allow",
-      "git show": "allow",
-      "git show *": "allow",
-      "git branch": "allow",
-      "git branch *": "allow",
-      "git remote": "allow",
-      "git remote *": "allow",
-      "npm test": "allow",
-      "npm test *": "allow",
-      "npm run typecheck": "allow",
-      "npm run typecheck *": "allow",
-      "npm run build": "allow",
-      "npm run build *": "allow",
-      "npm audit": "allow",
-      "npm audit *": "allow",
-      "node --version": "allow",
-      "npm --version": "allow",
-      "node scripts/install.mjs --dry-run": "allow",
-      "node scripts/install.mjs --dry-run *": "allow",
-      "rm *": "ask",
-      "rmdir *": "ask",
-      "mv *": "ask",
-      "move *": "ask",
-      "cp -rf *": "ask",
-      "xcopy * /y": "ask",
-      "> *": "ask",
-      "git push": "ask",
-      "git push *": "ask",
-      "git commit": "ask",
-      "git commit *": "ask",
-      "git reset": "ask",
-      "git reset *": "ask",
-      "git clean": "ask",
-      "git clean *": "ask",
-      "git merge": "ask",
-      "git merge *": "ask",
-      "git rebase": "ask",
-      "git rebase *": "ask",
-      "git cherry-pick": "ask",
-      "git cherry-pick *": "ask",
-      "git stash drop": "ask",
-      "git stash drop *": "ask",
-      "git branch -D": "ask",
-      "git branch -D *": "ask",
-      "npm uninstall": "ask",
-      "npm uninstall *": "ask",
-      "npm remove": "ask",
-      "npm remove *": "ask",
-      "npm publish": "ask",
-      "npm publish *": "ask",
-      "npm version": "ask",
-      "npm version *": "ask",
-      "npm unpublish": "ask",
-      "npm unpublish *": "ask",
-      "curl": "allow",
-      "curl *": "allow",
-      "curl -O *": "allow",
-      "curl -o *": "allow",
-      "curl -L *": "allow",
-      "curl -s *": "allow",
-      "curl -I *": "allow",
-      "wget": "allow",
-      "wget *": "allow",
-      "wget -O *": "allow",
-      "curl * | *": "deny",
-      "wget * | *": "deny",
-      "bash <(curl *)": "deny",
-      "bash <(wget *)": "deny",
-      "eval \"$(curl *)\"": "deny",
-      "eval \"$(wget *)\"": "deny",
-      "sudo": "ask",
-      "sudo *": "ask",
-      "su *": "ask",
-      "chmod": "ask",
-      "chmod *": "ask",
-      "chown": "ask",
-      "chown *": "ask"
-    },
+    "bash": { ...PERMISSIVE_BASH_PERMISSION },
     "task": {
       "*": "deny"
     }
@@ -341,7 +109,6 @@
     "command-lead": {
       "mode": "primary",
       "color": "#87cefa",
-      "model": "aiwanwu/gpt-5.4",
       "description": "Main orchestrator for execution work with approval and state ownership.",
       "prompt": "{file:./.opencode/agents/command-lead.md}",
       "permission": {
@@ -359,7 +126,6 @@
     },
     "plan-builder": {
       "mode": "all",
-      "model": "aiwanwu/gpt-5.4",
       "description": "Visible planner with explicit discussion mode for user-facing planning and internal normalize mode for stable skeleton convergence.",
       "prompt": "{file:./.opencode/agents/plan-builder.md}",
       "permission": {
@@ -372,9 +138,7 @@
         "edit": {
           "*": "deny"
         },
-        "bash": {
-          "*": "deny"
-        }
+        "bash": { ...PERMISSIVE_BASH_PERMISSION }
       }
     },
     "deep-plan-builder": {
@@ -392,9 +156,7 @@
         "edit": {
           "*": "deny"
         },
-        "bash": {
-          "*": "deny"
-        }
+        "bash": { ...PERMISSIVE_BASH_PERMISSION }
       }
     },
     "build": {
@@ -434,7 +196,6 @@
     "task-lead": {
       "mode": "subagent",
       "hidden": true,
-      "model": "aiwanwu/gpt-5.4",
       "description": "Single-task orchestrator for bounded local complexity with max depth one.",
       "prompt": "{file:./.opencode/agents/task-lead.md}",
       "permission": {
@@ -446,28 +207,12 @@
         "edit": {
           "*": "allow"
         },
-        "bash": {
-          "*": "deny",
-          "git status": "allow",
-          "git status --short": "allow",
-          "git diff": "allow",
-          "git diff --stat": "allow",
-          "git log": "allow",
-          "npm test": "allow",
-          "npm run typecheck": "allow",
-          "npm run build": "allow",
-          "npm audit": "allow",
-          "npm audit --omit=optional": "allow",
-          "node --version": "allow",
-          "npm --version": "allow",
-          "node scripts/install.mjs --dry-run": "allow"
-        }
+        "bash": { ...PERMISSIVE_BASH_PERMISSION }
       }
     },
     "explore": {
       "mode": "subagent",
       "hidden": true,
-      "model": "aiwanwu/gpt-5.4-mini",
       "description": "Read-only local exploration of files, structure, and code context.",
       "prompt": "{file:./.opencode/agents/explore.md}",
       "permission": {
@@ -477,9 +222,7 @@
         "edit": {
           "*": "deny"
         },
-        "bash": {
-          "*": "deny"
-        },
+        "bash": { ...PERMISSIVE_BASH_PERMISSION },
         "webfetch": "deny",
         "websearch": "deny"
       }
@@ -487,7 +230,6 @@
     "librarian": {
       "mode": "subagent",
       "hidden": true,
-      "model": "aiwanwu/gpt-5.4-mini",
       "description": "External documentation and OSS reference lookup with no edit authority.",
       "prompt": "{file:./.opencode/agents/librarian.md}",
       "permission": {
@@ -497,9 +239,7 @@
         "edit": {
           "*": "deny"
         },
-        "bash": {
-          "*": "deny"
-        },
+        "bash": { ...PERMISSIVE_BASH_PERMISSION },
         "webfetch": "allow",
         "websearch": "allow"
       }
@@ -507,7 +247,6 @@
     "plan-review": {
       "mode": "subagent",
       "hidden": true,
-      "model": "aiwanwu/gpt-5.4",
       "description": "Plan review specialist that evaluates plan artifacts and may request read-only Explore evidence.",
       "prompt": "{file:./.opencode/agents/plan-review.md}",
       "permission": {
@@ -518,15 +257,12 @@
         "edit": {
           "*": "deny"
         },
-        "bash": {
-          "*": "deny"
-        }
+        "bash": { ...PERMISSIVE_BASH_PERMISSION }
       }
     },
     "result-review": {
       "mode": "subagent",
       "hidden": true,
-      "model": "aiwanwu/gpt-5.4",
       "description": "Optional result review specialist for Command Lead execution summaries, with read-only Explore evidence when needed.",
       "prompt": "{file:./.opencode/agents/result-review.md}",
       "permission": {
@@ -537,10 +273,8 @@
         "edit": {
           "*": "deny"
         },
-        "bash": {
-          "*": "deny"
-        }
+        "bash": { ...PERMISSIVE_BASH_PERMISSION }
       }
     }
   }
-}
+};

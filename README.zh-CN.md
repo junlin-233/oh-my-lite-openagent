@@ -4,11 +4,8 @@
 
 一个轻量、可全局安装的 OpenCode 编排层。
 
-本项目是独立的 OpenCode 插件，不隶属于 OpenCode 官方，也不代表 OpenCode 官方背书或维护。
+受够了复杂的agent框架？来试试oh my lite吧！它足够轻量的同时也保证了多agent的效率，不必再担心太多复杂功能需要学习，你甚至只需要用主agent就可以体验全部功能！感谢oh my openagent的启发，事实上我们也确实借鉴了不少，但是我们足够轻量，足够简洁，这就够了！
 
-它会为 OpenCode 增加默认主控 agent、两个规划模式、受边界约束的 subagent、兼容模型接口的插件工具，以及一个安装后可在任意项目目录生效的全局安装器。
-
-它刻意比 Oh My OpenAgent 更轻。不引入庞大运行时，不绑定特定模型，不创建隐藏自治控制平面。它只是一个容易检查、容易安装、容易卸载的 bounded OpenCode 插件。
 
 ## 功能概览
 
@@ -25,7 +22,21 @@
 - OpenCode 原生 `build` 和 `plan` 模式会被隐藏并禁用。
 - 全局安装器会保留你已有的 model、provider、API key、插件和自定义 agent。
 
-## 快速开始
+
+## AI 安装
+
+不必再看下面又臭又长的文档了，将此提示复制并粘贴到你的 LLM 智能体（Claude Code、AmpCode、Cursor 等）中快速上手！
+
+```text
+为 OpenCode 安装并配置 Oh My Lite OpenAgent：
+https://raw.githubusercontent.com/junlin-233/oh-my-lite-openagent/main/AI-INSTALL.md
+
+严格按照 AI 安装指南执行。
+```
+
+AI 安装说明放在 [`AI-INSTALL.md`](./AI-INSTALL.md)。## 快速开始
+
+## 手动安装（不推荐）
 
 ### 安装
 
@@ -35,6 +46,8 @@
 npm install -g oh-my-lite-openagent
 oh-my-lite-openagent
 ```
+
+注意：npm registry 上下载到的版本可能落后于仓库 `main` 分支的最新改动。如果需要文档中描述的最新行为，请从源码安装，或先用 `npm view oh-my-lite-openagent version` 确认已发布版本。
 
 不全局安装，直接运行：
 
@@ -77,18 +90,7 @@ bounded_lite_runtime_profile
 bounded_lite_model_config
 ```
 
-## AI 安装
 
-将此提示复制并粘贴到你的 LLM 智能体（Claude Code、AmpCode、Cursor 等）中：
-
-```text
-为 OpenCode 安装并配置 Oh My Lite OpenAgent：
-https://raw.githubusercontent.com/junlin-233/oh-my-lite-openagent/main/AI-INSTALL.md
-
-严格按照 AI 安装指南执行。
-```
-
-AI 安装说明放在 [`AI-INSTALL.md`](./AI-INSTALL.md)。
 
 ## 工作方式
 
@@ -100,7 +102,9 @@ AI 安装说明放在 [`AI-INSTALL.md`](./AI-INSTALL.md)。
 .opencode/lib
 ```
 
-然后将仓库里的 `opencode.json` 合并到 OpenCode 全局配置中。
+然后将 `scripts/managed-config.mjs` 中的插件托管配置片段合并到 OpenCode 全局配置中。包内不再携带根目录 `opencode.json`；provider、model、API key、无关插件和自定义 agent 都属于用户自己的 OpenCode 配置。如果目标配置目录里只有 `opencode.jsonc`，安装器会读写 `opencode.jsonc`，不会额外创建 `opencode.json`；如果 `opencode.json` 和 `opencode.jsonc` 同时存在，则以 `opencode.json` 作为活动合并目标。
+
+托管的命令行权限对 8 个真实角色默认较宽松：bash 默认 `allow`，只有危险或敏感命令会 `ask`，例如破坏性文件操作、系统提权/权限命令、会修改 git 历史或远端的命令、npm 发布/移除/改版本、真实写入 OpenCode 全局配置的安装器命令，以及下载后直接执行的管道/eval 形式。被禁用覆盖的 OpenCode 内置 `build` 和 `plan` 仍保持全拒绝。
 
 默认配置目录：
 

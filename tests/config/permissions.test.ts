@@ -1,8 +1,10 @@
-import { readFileSync } from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
-const configPath = path.resolve(process.cwd(), "opencode.json");
-const config = JSON.parse(readFileSync(configPath, "utf8")) as {
+const managedConfigModule = await import(
+  pathToFileURL(path.resolve(process.cwd(), "scripts/managed-config.mjs")).href
+);
+const config = managedConfigModule.MANAGED_CONFIG as {
   permission?: Record<string, string | Record<string, string>>;
   agent: Record<
     string,
@@ -77,47 +79,43 @@ describe("delegation boundaries", () => {
     expect(config.agent.librarian?.permission?.websearch).toBe("allow");
   });
 
-  it("allows common safe validation commands while asking for other bash commands", () => {
+  it("allows ordinary bash commands while asking for dangerous or sensitive commands", () => {
     const bash = config.permission?.bash;
     expect(typeof bash).toBe("object");
     if (typeof bash !== "object" || bash === null) return;
 
     expect(Object.keys(bash)[0]).toBe("*");
-    expect(bash["*"]).toBe("ask");
-    expect(bash["git status"]).toBe("allow");
-    expect(bash["git status *"]).toBe("allow");
-    expect(bash["git diff"]).toBe("allow");
-    expect(bash["git diff *"]).toBe("allow");
-    expect(bash["npm test"]).toBe("allow");
-    expect(bash["npm test *"]).toBe("allow");
-    expect(bash["npm run typecheck"]).toBe("allow");
-    expect(bash["npm run typecheck *"]).toBe("allow");
+    expect(bash["*"]).toBe("allow");
+    expect(bash["rm"]).toBe("ask");
+    expect(bash["rm *"]).toBe("ask");
+    expect(bash["git push"]).toBe("ask");
+    expect(bash["git push *"]).toBe("ask");
     expect(bash["node scripts/install.mjs --dry-run"]).toBe("allow");
     expect(bash["node scripts/install.mjs --dry-run *"]).toBe("allow");
+    expect(bash["node scripts/install.mjs"]).toBe("ask");
+    expect(bash["node scripts/install.mjs *"]).toBe("ask");
   });
 
-  it("denies dangerous pipe operations in bash with correct rule ordering", () => {
+  it("asks for dangerous pipe operations in bash with correct rule ordering", () => {
     const bash = config.permission?.bash;
     expect(typeof bash).toBe("object");
     if (typeof bash !== "object" || bash === null) return;
 
-    // Verify deny rules exist
-    expect(bash["curl * | *"]).toBe("deny");
-    expect(bash["wget * | *"]).toBe("deny");
-    expect(bash["bash <(curl *)"]).toBe("deny");
-    expect(bash["bash <(wget *)"]).toBe("deny");
-    expect(bash["eval \"$(curl *)\""]).toBe("deny");
-    expect(bash["eval \"$(wget *)\""]).toBe("deny");
+    expect(bash["curl * | *"]).toBe("ask");
+    expect(bash["wget * | *"]).toBe("ask");
+    expect(bash["bash <(curl *)"]).toBe("ask");
+    expect(bash["bash <(wget *)"]).toBe("ask");
+    expect(bash["eval \"$(curl *)\""]).toBe("ask");
+    expect(bash["eval \"$(wget *)\""]).toBe("ask");
 
-    // Verify deny rules come AFTER allow rules (last match wins)
+    // Verify ask rules come AFTER the default allow (last match wins)
     const bashKeys = Object.keys(bash);
-    const curlAllowIndex = bashKeys.indexOf("curl *");
+    const allowIndex = bashKeys.indexOf("*");
     const curlDenyIndex = bashKeys.indexOf("curl * | *");
-    const wgetAllowIndex = bashKeys.indexOf("wget *");
     const wgetDenyIndex = bashKeys.indexOf("wget * | *");
 
-    expect(curlDenyIndex).toBeGreaterThan(curlAllowIndex);
-    expect(wgetDenyIndex).toBeGreaterThan(wgetAllowIndex);
+    expect(curlDenyIndex).toBeGreaterThan(allowIndex);
+    expect(wgetDenyIndex).toBeGreaterThan(allowIndex);
   });
 
   it("asks for dangerous git and npm operations", () => {
@@ -162,6 +160,7 @@ describe("delegation boundaries", () => {
     expect(edit["**/*.key"]).toBe("ask");
     expect(edit["**/*.pem"]).toBe("ask");
     expect(edit["**/opencode.json"]).toBe("ask");
+    expect(edit["**/opencode.jsonc"]).toBe("ask");
     expect(edit["**/package.json"]).toBe("ask");
   });
 
@@ -178,19 +177,45 @@ describe("delegation boundaries", () => {
     expect(edit["**/composer.lock"]).toBe("deny");
   });
 
-  it("keeps Task Lead non-interactive by allowing edits and denying non-whitelisted bash", () => {
+  it("uses the permissive bash policy for every real role", () => {
+    const globalBash = config.permission?.bash;
+    expect(typeof globalBash).toBe("object");
+    if (typeof globalBash !== "object" || globalBash === null) return;
+
+    for (const agentName of [
+      "command-lead",
+      "plan-builder",
+      "deep-plan-builder",
+      "task-lead",
+      "explore",
+      "librarian",
+      "plan-review",
+      "result-review",
+    ]) {
+      const agentBash = config.agent[agentName]?.permission?.bash ?? globalBash;
+      expect(typeof agentBash).toBe("object");
+      if (typeof agentBash !== "object" || agentBash === null) continue;
+
+      expect(Object.keys(agentBash)[0], agentName).toBe("*");
+      expect(agentBash["*"], agentName).toBe("allow");
+      expect(agentBash["rm *"], agentName).toBe("ask");
+      expect(agentBash["git push"], agentName).toBe("ask");
+      expect(agentBash["node scripts/install.mjs"], agentName).toBe("ask");
+      expect(agentBash["curl * | *"], agentName).toBe("ask");
+      expect(agentBash["node scripts/install.mjs --dry-run"], agentName).toBe("allow");
+      expect(Object.values(agentBash), agentName).not.toContain("deny");
+    }
+  });
+
+  it("keeps disabled built-in modes fully denied", () => {
+    expect(config.agent.build?.permission?.bash).toEqual({ "*": "deny" });
+    expect(config.agent.plan?.permission?.bash).toEqual({ "*": "deny" });
+  });
+
+  it("keeps Task Lead edit-capable for bounded execution", () => {
     const taskLeadPermission = config.agent["task-lead"]?.permission;
     const edit = taskLeadPermission?.edit;
-    const bash = taskLeadPermission?.bash;
 
     expect(edit).toEqual({ "*": "allow" });
-    expect(typeof bash).toBe("object");
-    if (typeof bash !== "object" || bash === null) return;
-
-    expect(Object.keys(bash)[0]).toBe("*");
-    expect(bash["*"]).toBe("deny");
-    expect(bash["npm test"]).toBe("allow");
-    expect(bash["npm run typecheck"]).toBe("allow");
-    expect(Object.values(bash)).not.toContain("ask");
   });
 });

@@ -2,47 +2,60 @@
 
 [English](./README.md) | [简体中文](./README.zh-CN.md)
 
-A small, installable OpenCode orchestration layer.
+A lightweight, globally installable OpenCode orchestration layer.
 
-This project is an independent OpenCode plugin and is not affiliated with, endorsed by, or maintained by the OpenCode team.
+Tired of complicated agent frameworks? Try Oh My Lite! It stays lightweight while still preserving the efficiency of multi-agent workflows. You do not need to worry about learning a pile of complex features; you can even use only the main agent and still experience the full feature set. Thanks to Oh My OpenAgent for the inspiration. We did borrow quite a bit from it, but this project is lightweight enough and simple enough — and that is the point.
 
-It gives OpenCode a default command lead, two planning modes, bounded subagents, safe plugin tools, and a global installer that works from any project directory after setup.
+## Feature Overview
 
-This is intentionally lighter than Oh My OpenAgent. No giant runtime, no model lock-in, no hidden autonomous control plane. Just a bounded OpenCode plugin that is easy to inspect, install, and remove.
-
-## What You Get
-
-- `command-lead`: the default execution orchestrator.
-- `plan-builder`: visible planning mode for requirements and plan skeletons.
-- `deep-plan-builder`: visible deep planning mode with mandatory plan review.
+- `command-lead`: the default execution orchestrator agent.
+- `plan-builder`: visible planning mode for requirement clarification and plan skeletons.
+- `deep-plan-builder`: visible deep-planning mode with mandatory plan review.
 - `task-lead`, `explore`, `librarian`, `plan-review`, `result-review`: hidden bounded subagents.
-- Task Lead profiles (`quick`, `code`, `research`, `writing`, `visual`, `deep`, `risk-high`) map plan attributes to dispatch metadata and model recommendations without adding extra agents.
-- Each role maintains its own local todo list for multi-step work, following OpenCode-style task tracking without replacing artifacts or canonical state.
+- Task Lead profiles (`quick`, `code`, `research`, `writing`, `visual`, `deep`, `risk-high`) map plan attributes to dispatch metadata and model recommendations without adding real agents.
+- Each role maintains its own local todo list following OpenCode-style task tracking, but todos do not replace artifacts or canonical state.
 - `result-review` is optional and user-selectable. It reviews Command Lead execution summaries/final integrated results, not Task Lead child task returns.
 - Delegating roles use an explicit assignment template: `TASK`, `EXPECTED OUTCOME`, `ROLE`, `SCOPE`, `UPSTREAM EVIDENCE`, `REQUIRED TOOLS`, `MUST DO`, `MUST NOT DO`, `CONTEXT`, `DELIVERABLE FORMAT`, and `FAILURE RETURN`.
-- Durable plan artifacts are written under `.liteagent/plans/` with an append-only `.liteagent/plan-index.jsonl`.
-- Provider-safe plugin tools: `bounded_lite_route`, `bounded_lite_plan_dag`, `bounded_lite_plan_readiness`, `bounded_lite_plan_artifact`, `bounded_lite_background`, `bounded_lite_runtime_profile`, `bounded_lite_model_config`.
-- OpenCode native `build` and `plan` modes hidden behind disabled overrides.
-- A global installer that preserves your existing model, provider, API key, plugins, and custom agents.
+- Durable plan artifacts are written to `.liteagent/plans/`, with an append-only index at `.liteagent/plan-index.jsonl`.
+- Provider-compatible plugin tools: `bounded_lite_route`, `bounded_lite_plan_dag`, `bounded_lite_plan_readiness`, `bounded_lite_plan_artifact`, `bounded_lite_background`, `bounded_lite_runtime_profile`, `bounded_lite_model_config`.
+- OpenCode's native `build` and `plan` modes are hidden and disabled.
+- The global installer preserves your existing model, provider, API key, plugin, and custom agent settings.
+
+## AI Installation
+
+You do not need to read the long manual documentation below. Copy and paste this prompt into your LLM agent, such as Claude Code, AmpCode, Cursor, or similar tools, to get started quickly:
+
+```text
+Install and configure Oh My Lite OpenAgent for OpenCode:
+https://raw.githubusercontent.com/junlin-233/oh-my-lite-openagent/main/AI-INSTALL.md
+
+Follow the AI installation guide exactly.
+```
+
+The AI installation guide lives in [`AI-INSTALL.md`](./AI-INSTALL.md).
 
 ## Quick Start
 
+## Manual Installation (Not Recommended)
+
 ### Install
 
-From npm (after the package is published):
+Install from npm after the package is published:
 
 ```bash
 npm install -g oh-my-lite-openagent
 oh-my-lite-openagent
 ```
 
-Or run without a global install:
+Note: the version downloaded from the npm registry may lag behind the latest changes on the repository `main` branch. If you need the newest behavior described in the documentation, install from source or first check the published version with `npm view oh-my-lite-openagent version`.
+
+Run without a global install:
 
 ```bash
 npx oh-my-lite-openagent
 ```
 
-From source:
+Install from source:
 
 ```bash
 git clone https://github.com/junlin-233/oh-my-lite-openagent.git
@@ -66,7 +79,7 @@ opencode debug config
 opencode debug agent command-lead
 ```
 
-`command-lead` should be `native: false` and should include:
+`command-lead` should show `native: false` and include these tools:
 
 ```text
 bounded_lite_route
@@ -77,28 +90,9 @@ bounded_lite_runtime_profile
 bounded_lite_model_config
 ```
 
-## AI Install
-
-If you already have OpenCode, copy and paste this prompt into it:
-
-```text
-Install and configure Oh My Lite OpenAgent for OpenCode:
-https://raw.githubusercontent.com/junlin-233/oh-my-lite-openagent/main/AI-INSTALL.md
-
-Follow the AI installation guide exactly.
-```
-
-The AI agent will:
-1. Clone the repo and run `npm install` + `npm run install:opencode`
-2. Ask which AI providers you have access to
-3. Call `bounded_lite_model_config({ action: "import" })`, then `action: "auto"` to generate role and Task Lead profile recommendations from all discovered providers
-4. Verify the installation worked
-
-AI installation instructions live in [`AI-INSTALL.md`](./AI-INSTALL.md).
-
 ## How It Works
 
-The installer copies only the runtime files OpenCode needs:
+The installer only copies the files OpenCode needs at runtime:
 
 ```text
 .opencode/agents
@@ -106,30 +100,32 @@ The installer copies only the runtime files OpenCode needs:
 .opencode/lib
 ```
 
-Then it merges `opencode.json` into the OpenCode global config.
+Then it merges the plugin-managed config fragment from `scripts/managed-config.mjs` into the OpenCode global config. The package no longer ships a root `opencode.json`; provider, model, API key, unrelated plugin, and custom agent settings belong to the user's own OpenCode config. If the target config directory only has `opencode.jsonc`, the installer reads and writes `opencode.jsonc` and does not create an extra `opencode.json`; if both `opencode.json` and `opencode.jsonc` exist, `opencode.json` is treated as the active merge target.
 
-Default config locations:
+Managed command-line permissions are intentionally permissive for the eight real roles: bash defaults to `allow`, and only dangerous or sensitive commands ask for confirmation. Examples include destructive file operations, system privilege/permission commands, commands that modify git history or remotes, npm publish/remove/version commands, installer commands that actually write OpenCode global config, and pipe/eval forms that execute downloaded content. The disabled OpenCode built-in `build` and `plan` overrides remain fully denied.
+
+Default config directories:
 
 ```text
 Linux/macOS: ~/.config/opencode
 Windows:     %APPDATA%\opencode
 ```
 
-Override the target directory:
+Specify a target directory:
 
 ```bash
 npm run install:opencode -- --config-dir /path/to/opencode-config
 ```
 
-Dry run:
+Dry run without writing files:
 
 ```bash
 oh-my-lite-openagent --dry-run
-# or, from a source checkout:
+# Or from a source checkout:
 node scripts/install.mjs --dry-run
 ```
 
-Interactive model setup:
+Interactive model configuration:
 
 ```bash
 oh-my-lite-openagent --interactive
@@ -137,9 +133,9 @@ oh-my-lite-openagent --interactive
 
 ## npm Package Publishing
 
-The package exposes the installer as two CLI names: `oh-my-lite-openagent` and `omlo-install`.
+The package exposes two CLI names: `oh-my-lite-openagent` and `omlo-install`.
 
-Before publishing:
+Before publishing, run:
 
 ```bash
 npm install
@@ -148,25 +144,25 @@ npm run typecheck
 npm run pack:dry-run
 ```
 
-Publish dry run:
+Publishing dry run:
 
 ```bash
 npm run publish:dry-run
 ```
 
-Publish to npm when ready:
+Publish after confirmation:
 
 ```bash
 npm publish
 ```
 
-If npm asks for a one-time password, enter the 6-digit code from the authenticator app attached to your npm account, or pass it directly:
+If npm asks for a one-time password (OTP), open the authenticator app connected to your npm account and enter the corresponding 6-digit code. You can also pass it directly:
 
 ```bash
 npm publish --otp 123456
 ```
 
-If you prefer not to enter OTP interactively, create a granular npm access token with publish permission and bypass/automation support, then publish with that token:
+If you do not want to enter OTP interactively, create a granular access token with publish permissions and bypass/automation support, then publish with that token:
 
 ```bash
 npm config set //registry.npmjs.org/:_authToken=YOUR_NPM_TOKEN
@@ -174,82 +170,71 @@ npm publish
 npm config delete //registry.npmjs.org/:_authToken
 ```
 
-`prepublishOnly` runs the test suite, typecheck, and package dry run automatically before a real publish.
+Before a real publish, `prepublishOnly` automatically runs tests, typecheck, and package dry run.
 
 ## Role and Task Lead Profile Model Configuration
 
-Each role needs a model that fits its capability. Run this inside the OpenCode TUI:
+Run this inside the OpenCode TUI:
 
 ```text
 /agent-models
 ```
 
-The command uses the `bounded_lite_model_config` tool. The default workflow is import first, preview role and Task Lead profile recommendations, ask for user changes, then apply.
+This command first imports all model pools OpenCode can discover, then asks AI to recommend models from that pool based on role capabilities and Task Lead profile capabilities. By default, it includes connected providers such as `openai`, `opencode`, and `opencode-go`; the current global `model` is context only and is not used as a hard filter. Codex backend models are excluded by default.
 
-### import — Load all discovered provider models
+Recommended workflow:
 
-```
+```text
 bounded_lite_model_config({ action: "import" })
-```
-
-By default this imports every model provider OpenCode can discover, including subscription providers such as `opencode` and `opencode-go`. The current global `model` is context only; it is not a hard import filter. Codex backend models are excluded unless explicitly allowed.
-
-### auto — Recommend the best imported model for each role and profile
-
-```
 bounded_lite_model_config({ action: "auto" })
 ```
 
-Returns recommended assignments only. It does not write config. The report includes role assignments and `Recommended Task Lead profile assignments JSON`.
+`action: "auto"` only returns recommendations and does not write config. It returns both role recommendations and `Recommended Task Lead profile assignments JSON`. Show the recommendations to the user first, ask whether they want changes, and only then run `action: "apply"`.
 
-| Role              | Needs                  | Best models first                          |
-|-------------------|------------------------|--------------------------------------------|
-| command-lead      | Strongest reasoning    | strongest imported reasoning model |
-| plan-builder      | Strong reasoning       | strongest imported structured planning model |
-| deep-plan-builder | Detailed handoff plans | strong imported planning model with mandatory review |
-| task-lead         | Mid-tier execution     | capable imported implementation model |
-| explore           | Fast & cheap           | fast/cheap imported mini, flash, or highspeed model |
-| librarian         | Fast & cheap           | fast/cheap imported mini, flash, or highspeed model |
-| plan-review       | Strongest reasoning    | strongest imported review model |
-| result-review     | Strongest reasoning    | strongest imported review model |
+Role recommendations:
 
-Task Lead profiles are selected from `plan.subtasks[].attributes`. They do **not** create new agents; they configure dispatch metadata for the single hidden `task-lead` agent. Current profile models are recommendations/fallback metadata unless the runtime supports per-task model override.
-
-| Profile | Matching attributes | Best models first |
+| Role | Capability Need | Recommendation Direction |
 | --- | --- | --- |
-| `quick` | `quick` | fastest low-cost imported model |
-| `code` | `code` | strong bounded implementation model |
-| `research` | `research`, `docs` | fast research or documentation lookup model |
-| `writing` | `writing` | clear prose/documentation model |
-| `visual` | `multimodal`, `visual` | visual-capable or strong UI reasoning model |
-| `deep` | `deep`, `large-context` | stronger long-context reasoning model |
-| `risk-high` | `risk-high`, `security`, `migration` | strong critical-reasoning model |
+| `command-lead` | Strongest reasoning | Strongest orchestration/reasoning model |
+| `plan-builder` | Strong planning | Strong model good at structured planning |
+| `deep-plan-builder` | Detailed handoff planning | Strong planning model suitable for lower-strength executor handoff |
+| `task-lead` | Bounded execution | Mid-to-high tier implementation model as the default/fallback executor |
+| `explore` | Fast retrieval | Fast and cheap mini/flash/highspeed model |
+| `librarian` | Fast research | Fast and cheap documentation/research model |
+| `plan-review` | Critical review | Strong reasoning review model |
+| `result-review` | Result verification | Strong reasoning verification model |
 
-### list — Show current role/profile assignments and available models
+Task Lead profiles are selected from `plan.subtasks[].attributes`. They **do not** add real agents; they only configure dispatch metadata for the single hidden `task-lead` agent. Current profile models are used as recommendation/fallback metadata unless the runtime supports per-task model override.
 
-```
-bounded_lite_model_config({ action: "list" })
-```
+| Profile | Matching attributes | Recommendation Direction |
+| --- | --- | --- |
+| `quick` | `quick` | Fastest low-cost model |
+| `code` | `code` | Strong code implementation model |
+| `research` | `research`, `docs` | Fast research/documentation lookup model |
+| `writing` | `writing` | Documentation and explanatory writing model |
+| `visual` | `multimodal`, `visual` | Visual-capable or strong UI reasoning model |
+| `deep` | `deep`, `large-context` | Stronger long-context reasoning model |
+| `risk-high` | `risk-high`, `security`, `migration` | Strong cautious reasoning model for high-risk changes |
 
-### apply — Manually assign models to roles and profiles
+Manual adjustments can only write models that exist in the imported pool, for example:
 
-```
+```text
 bounded_lite_model_config({ action: "apply", assignments: { "command-lead": "openai/gpt-5.4", "explore": "openai/gpt-5.4-mini" } })
 ```
 
-The `assignments` object maps role names to `provider/model` strings. The `taskLeadProfileAssignments` object maps profile names to `provider/model` strings. Only known roles/profiles are updated. Unknown entries are skipped. Models outside the imported pool are rejected by default.
+The command writes `agent.<role>.model` into the OpenCode config while preserving unrelated provider, model, plugin, and custom agent settings. By default, it rejects models outside the imported pool to prevent AI from inventing provider/model IDs.
 
-The same command can preview and apply Task Lead profile models without adding new agents. Profiles are selected from `plan.subtasks[].attributes` and currently act as dispatch metadata unless the runtime supports per-task model override:
+The same command can also preview and write Task Lead profile models without adding real agents. Profiles are selected from `plan.subtasks[].attributes`; currently they are used as dispatch metadata unless the runtime supports per-task model override:
 
-```
+```text
 bounded_lite_model_config({ action: "apply", taskLeadProfileAssignments: { "code": "opencode/claude-sonnet-4-6", "quick": "opencode-go/minimax-m2.7-highspeed" } })
 ```
 
 Built-in profiles include `quick`, `code`, `research`, `writing`, `visual`, `deep`, and `risk-high`.
 
-You may apply both groups together:
+You can also write role models and profile models together:
 
-```
+```text
 bounded_lite_model_config({
   action: "apply",
   assignments: {
@@ -264,24 +249,22 @@ bounded_lite_model_config({
 })
 ```
 
-**Typical workflow**: Run `action=import`, then `action=auto`, ask the user whether they want changes, then use `action=apply`.
-
-## Agent Map
+## Agent List
 
 | Agent | Visible | Mode | Purpose |
 | --- | --- | --- | --- |
-| `command-lead` | yes | `primary` | Default execution orchestrator |
-| `plan-builder` | yes | `all` | Planning and skeleton convergence |
+| `command-lead` | yes | `primary` | Default execution orchestration |
+| `plan-builder` | yes | `all` | Planning and plan skeleton convergence |
 | `deep-plan-builder` | yes | `all` | Deep planning with mandatory plan review |
-| `task-lead` | no | `subagent` | One bounded delegated task |
+| `task-lead` | no | `subagent` | Single bounded delegated task |
 | `explore` | no | `subagent` | Local read-only exploration |
-| `librarian` | no | `subagent` | External docs and OSS lookup |
+| `librarian` | no | `subagent` | External documentation and OSS reference lookup |
 | `plan-review` | no | `subagent` | Plan artifact review |
 | `result-review` | no | `subagent` | Optional review of Command Lead execution results |
-| `build` | no | `subagent` | Disabled OpenCode built-in override |
-| `plan` | no | `subagent` | Disabled OpenCode built-in override |
+| `build` | no | `subagent` | Disabled OpenCode built-in mode override |
+| `plan` | no | `subagent` | Disabled OpenCode built-in mode override |
 
-## Commands
+## Common Commands
 
 ```bash
 npm test
@@ -292,25 +275,25 @@ npm run install:opencode
 
 ## Uninstall
 
-The installer writes a backup before changing global config:
+The installer writes a backup before modifying global config:
 
 ```text
 opencode.json.bak
 ```
 
-Restore it on Linux/macOS:
+Restore on Linux/macOS:
 
 ```bash
 cp ~/.config/opencode/opencode.json.bak ~/.config/opencode/opencode.json
 ```
 
-Restore it on Windows PowerShell:
+Restore on Windows PowerShell:
 
 ```powershell
 Copy-Item "$env:APPDATA\opencode\opencode.json.bak" "$env:APPDATA\opencode\opencode.json" -Force
 ```
 
-To remove local development artifacts:
+Remove local development artifacts:
 
 ```bash
 rm -rf node_modules dist
@@ -326,7 +309,7 @@ Remove-Item -Recurse -Force node_modules, dist
 
 ### `Invalid tools[n].name`
 
-Use the current plugin version. Tool names must not contain dots. Valid names are:
+Use the current plugin version. Tool names must not contain dots. Valid tool names are:
 
 ```text
 bounded_lite_route
@@ -337,7 +320,7 @@ bounded_lite_runtime_profile
 bounded_lite_model_config
 ```
 
-### OpenCode still starts in normal Build/Plan
+### OpenCode Still Enters Normal Build/Plan
 
 Run:
 
@@ -354,27 +337,27 @@ build.mode: subagent
 plan.mode: subagent
 ```
 
-### Plugin only works in this repository
+### Plugin Only Works in This Repository
 
-You are probably using the project-local config only. Run the global installer:
+You may only be using the project-local config and have not installed it globally. Run:
 
 ```bash
 npm run install:opencode
 ```
 
-## Status
+## Current Status
 
 - Linux: verified.
-- Windows: designed for `%APPDATA%\opencode`, not yet verified in this repository.
-- OpenCode tested version in this environment: `1.4.6`.
+- Windows: designed for `%APPDATA%\opencode`, but not yet verified on a real Windows machine in this repository.
+- OpenCode version tested in this environment: `1.4.6`.
 
 ## Design Rules
 
 - Keep the system bounded.
 - Do not add a fourth visible mode.
 - Do not turn hidden subagents into autonomous control planes.
-- Keep each role's todo list local to that role; todos do not replace canonical state or artifact records.
-- Keep Result Review optional and scoped to Command Lead-owned execution summaries.
-- Keep delegated assignments explicit and bounded; do not use hidden initiator markers or whole-repo unbounded search instructions.
-- Keep plugin tool names provider-safe: `^[a-zA-Z0-9_-]+$`.
-- Preserve user provider/model/API configuration during install.
+- Each role's todo list is only that role's working memory and does not replace canonical state or artifact records.
+- Keep Result Review optional and limited to Command Lead-owned execution summaries.
+- Delegated tasks must be explicit and bounded; do not use hidden initiator markers, and do not request whole-repo unbounded searches.
+- Plugin tool names must be provider-compatible: `^[a-zA-Z0-9_-]+$`.
+- Preserve the user's provider, model, and API configuration during installation.

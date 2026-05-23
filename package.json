@@ -12,7 +12,7 @@
     ".opencode/plugins/",
     ".opencode/lib/",
     "scripts/install.mjs",
-    "opencode.json",
+    "scripts/managed-config.mjs",
     "README.md",
     "README.zh-CN.md",
     "AI-INSTALL.md",

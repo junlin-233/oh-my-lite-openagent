@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import {
   PLANNER_CONTRACTS,
@@ -9,13 +9,15 @@ import {
 } from "../../.opencode/lib/contracts.js";
 import { CATEGORY_ROUTES } from "../../.opencode/lib/runtime/categories.js";
 
-const configPath = path.resolve(process.cwd(), "opencode.json");
-const config = JSON.parse(readFileSync(configPath, "utf8")) as {
+const managedConfigModule = await import(
+  pathToFileURL(path.resolve(process.cwd(), "scripts/managed-config.mjs")).href
+);
+const config = managedConfigModule.MANAGED_CONFIG as {
   agent: Record<string, { mode: string; hidden?: boolean }>;
 };
 
 describe("config and runtime parity", () => {
-  it("keeps opencode.json agent registration aligned with role contracts", () => {
+  it("keeps managed agent registration aligned with role contracts", () => {
     const contractRoleNames = ROLE_CONTRACTS.map((role) => role.name).sort();
     const configuredRoleNames = Object.keys(config.agent)
       .filter((name) => name !== "build" && name !== "plan")
