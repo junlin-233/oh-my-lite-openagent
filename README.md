@@ -34,8 +34,6 @@ Follow the AI installation guide exactly.
 
 The AI installation guide lives in [`AI-INSTALL.md`](./AI-INSTALL.md).
 
-## Quick Start
-
 ## Manual Installation (Not Recommended)
 
 ### Install
