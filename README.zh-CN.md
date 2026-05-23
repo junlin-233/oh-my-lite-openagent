@@ -34,7 +34,7 @@ https://raw.githubusercontent.com/junlin-233/oh-my-lite-openagent/main/AI-INSTAL
 严格按照 AI 安装指南执行。
 ```
 
-AI 安装说明放在 [`AI-INSTALL.md`](./AI-INSTALL.md)。## 快速开始
+AI 安装说明放在 [`AI-INSTALL.md`](./AI-INSTALL.md)。
 
 ## 手动安装（不推荐）
 
