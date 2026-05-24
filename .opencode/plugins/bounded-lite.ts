@@ -1,4 +1,4 @@
-import { MAX_CHILD_ORCHESTRATOR_DEPTH, type RoutingCategory } from "../lib/contracts.js";
+import { MAX_CHILD_ORCHESTRATOR_DEPTH, ROLE_CONTRACTS, type RoutingCategory } from "../lib/contracts.js";
 import { BackgroundCoordinator } from "../lib/runtime/background.js";
 import {
   type PluginHooks,
@@ -10,9 +10,6 @@ import { validatePlanReadiness } from "../lib/runtime/plan-readiness.js";
 import { writePlanArtifact } from "../lib/runtime/plan-artifact.js";
 import { createRuntimeProfile } from "../lib/runtime/safety.js";
 import {
-  applyRoleModelConfig,
-  applyRoleReasoningEffortConfig,
-  applyTaskLeadProfileModelConfig,
   formatAutoModelReport,
   formatModelImportReport,
   formatModelConfigReport,
@@ -33,6 +30,20 @@ import {
   summarizeRoleModels,
   summarizeTaskLeadProfileModels,
 } from "../lib/runtime/model-config.js";
+import {
+  applyLiteRoleModelConfig,
+  applyLiteRoleReasoningEffortConfig,
+  applyLiteTaskLeadProfileModelConfig,
+  applyLiteTaskLeadProfileReasoningEffortConfig,
+  createDefaultLiteConfig,
+  defaultRoleReasoningEffort,
+  LITE_CONFIG_FILE,
+  migrateLiteConfigFromOpenCodeConfig,
+  readLiteConfig,
+  resolveSupportedReasoningEffort,
+  type LiteOpenAgentConfig,
+  withLiteConfigAppliedToOpenCodeConfig,
+} from "../lib/runtime/lite-config.js";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -401,6 +412,88 @@ async function writeOpenCodeConfig(config: Record<string, unknown>, configDir?: 
   return configPath;
 }
 
+function resolveLiteConfigPath(configDir?: string): string {
+  return path.join(defaultConfigDir(configDir), LITE_CONFIG_FILE);
+}
+
+async function readLiteConfigFile(configDir?: string, opencodeConfig?: Record<string, unknown>): Promise<LiteOpenAgentConfig> {
+  try {
+    const content = await readFile(resolveLiteConfigPath(configDir), "utf8");
+    return migrateLiteConfigFromOpenCodeConfig(opencodeConfig ?? {}, readLiteConfig(parseJsonConfig(content)));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") throw error;
+    return migrateLiteConfigFromOpenCodeConfig(opencodeConfig ?? {}, createDefaultLiteConfig());
+  }
+}
+
+async function writeLiteConfigFile(liteConfig: LiteOpenAgentConfig, configDir?: string): Promise<string> {
+  const liteConfigPath = resolveLiteConfigPath(configDir);
+  await mkdir(path.dirname(liteConfigPath), { recursive: true });
+  try {
+    await writeFile(`${liteConfigPath}.bak`, await readFile(liteConfigPath, "utf8"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") throw error;
+    await writeFile(`${liteConfigPath}.bak`, `${JSON.stringify(createDefaultLiteConfig(), null, 2)}\n`);
+  }
+  await writeFile(liteConfigPath, `${JSON.stringify(liteConfig, null, 2)}\n`);
+  return liteConfigPath;
+}
+
+async function updateGeneratedAgentMarkdownFiles(
+  liteConfig: LiteOpenAgentConfig,
+  models: ReturnType<typeof listProviderModels>,
+  configDir?: string,
+): Promise<string[]> {
+  const directory = defaultConfigDir(configDir);
+  const agentsDir = path.join(directory, "agents");
+  await mkdir(agentsDir, { recursive: true });
+  const updated: string[] = [];
+
+  for (const role of ROLE_CONTRACTS) {
+    const filePath = path.join(agentsDir, `${role.name}.md`);
+    let content = `---\nmode: ${role.opencodeMode}\ndescription: ${JSON.stringify(role.name)}\n---\n\n# ${role.name}\n`;
+    try {
+      content = await readFile(filePath, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") throw error;
+    }
+    const model = liteConfig.roleModels[role.name];
+    const modelInfo = model ? models.find((item) => item.id === model) ?? model : undefined;
+    const effectiveReasoning = resolveSupportedReasoningEffort({
+      ...(modelInfo ? { model: modelInfo } : {}),
+      ...(liteConfig.roleReasoningEffort[role.name] ? { requested: liteConfig.roleReasoningEffort[role.name] } : {}),
+      fallback: defaultRoleReasoningEffort(role.name),
+    });
+    const nextContent = upsertMarkdownFrontmatter(content, {
+      ...(model ? { model } : {}),
+      ...(effectiveReasoning ? { reasoningEffort: effectiveReasoning } : {}),
+    });
+    await writeFile(`${filePath}.bak`, content);
+    await writeFile(filePath, nextContent);
+    updated.push(filePath);
+  }
+
+  return updated;
+}
+
+function upsertMarkdownFrontmatter(content: string, updates: Record<string, string>): string {
+  const match = content.match(/^---\n([\s\S]*?)\n---\n?/);
+  const body = match ? content.slice(match[0].length) : content;
+  const frontmatter = match?.[1] ?? "";
+  const lines = frontmatter.split("\n").filter((line) => {
+    const key = line.split(":", 1)[0]?.trim();
+    return key !== "model" && key !== "reasoningEffort";
+  });
+  for (const [key, value] of Object.entries(updates)) {
+    lines.push(`${key}: ${yamlScalar(value)}`);
+  }
+  return `---\n${lines.join("\n")}\n---\n\n${body.replace(/^\n+/, "")}`;
+}
+
+function yamlScalar(value: string): string {
+  return /^[a-zA-Z0-9_./-]+$/.test(value) ? value : JSON.stringify(value);
+}
+
 async function listRuntimeProviderModels(input: PluginInput): Promise<ReturnType<typeof listProviderModels>> {
   const client = input.client as {
     config?: {
@@ -678,7 +771,11 @@ If no provider models are found, tell the user to configure or connect OpenCode 
         async execute(args, context) {
           const action = typeof args["action"] === "string" ? args["action"] : "list";
           const config = await readOpenCodeConfig(options.configDir);
-          const effectiveConfig = withConfiguredTaskLeadProfiles(config, options);
+          const liteConfig = await readLiteConfigFile(options.configDir, config);
+          const effectiveConfig = withLiteConfigAppliedToOpenCodeConfig(
+            withConfiguredTaskLeadProfiles(config, options),
+            liteConfig,
+          );
           const credentialProviderIds = await readOpenCodeAuthProviderIds();
           const runtimeModels = await listRuntimeProviderModels(context);
           const modelsDevModels = await listModelsDevProviderModels(credentialProviderIds);
@@ -762,7 +859,7 @@ If no provider models are found, tell the user to configure or connect OpenCode 
               });
 
 	              const configModels = listProviderModels(effectiveConfig);
-	
+
 	              const helpLines = [
                 "Oh My Lite OpenAgent auto model configuration",
                 "",
@@ -832,53 +929,54 @@ If no provider models are found, tell the user to configure or connect OpenCode 
               readEmbeddedReasoningEffortAssignments(assignments),
               args["reasoningEffortAssignments"] ?? args["reasoningAssignments"],
             );
+            const profileReasoningEffortAssignments = mergeRecordAssignments(
+              {},
+              args["taskLeadProfileReasoningEffortAssignments"] ?? args["profileReasoningEffortAssignments"],
+            );
 
             const hasRoleAssignments = Object.keys(roleModelAssignments).length > 0;
             const hasReasoningAssignments = Object.keys(reasoningEffortAssignments).length > 0;
             const hasProfileAssignments = typeof taskLeadProfileAssignments === "object" &&
               taskLeadProfileAssignments !== null &&
               !Array.isArray(taskLeadProfileAssignments);
+            const hasProfileReasoningAssignments = Object.keys(profileReasoningEffortAssignments).length > 0;
 
-            if (!hasRoleAssignments && !hasProfileAssignments && !hasReasoningAssignments) {
+            if (!hasRoleAssignments && !hasProfileAssignments && !hasReasoningAssignments && !hasProfileReasoningAssignments) {
               throw new Error(
-                "bounded_lite_model_config apply requires assignments, reasoningEffortAssignments, or taskLeadProfileAssignments.",
+                "bounded_lite_model_config apply requires assignments, reasoningEffortAssignments, taskLeadProfileAssignments, or taskLeadProfileReasoningEffortAssignments.",
               );
             }
 
-            const result = hasRoleAssignments ? applyRoleModelConfig(
-              config,
+            const result = hasRoleAssignments ? applyLiteRoleModelConfig(
+              liteConfig,
               roleModelAssignments,
               importedPool.map((model) => model.id),
               {
                 allowUnavailableModels: args["allowUnavailableModels"] === true,
               },
             ) : { changed: [], skipped: [], warnings: [] };
-            const reasoningResult = hasReasoningAssignments ? applyRoleReasoningEffortConfig(
-              config,
+            const reasoningResult = hasReasoningAssignments ? applyLiteRoleReasoningEffortConfig(
+              liteConfig,
               reasoningEffortAssignments,
             ) : { changed: [], skipped: [] };
-            const profileConfig = withConfiguredTaskLeadProfiles(config, options);
-            const profileResult = hasProfileAssignments ? applyTaskLeadProfileModelConfig(
-              profileConfig,
+            const profileLiteResult = hasProfileAssignments ? applyLiteTaskLeadProfileModelConfig(
+              liteConfig,
               taskLeadProfileAssignments as Record<string, unknown>,
               importedPool.map((model) => model.id),
               {
                 allowUnavailableModels: args["allowUnavailableModels"] === true,
               },
             ) : { changed: [], skipped: [], warnings: [] };
-            if (hasProfileAssignments || isRecord(config["taskLeadProfiles"])) {
-              const profiles = isRecord(profileConfig["taskLeadProfiles"])
-                ? profileConfig["taskLeadProfiles"]
-                : {};
-              writeTaskLeadProfilesToPluginOptions(config, profiles);
-            }
-            const updatedEffectiveConfig = withConfiguredTaskLeadProfiles(config, {
-              ...options,
-              taskLeadProfiles: isRecord(profileConfig["taskLeadProfiles"])
-                ? profileConfig["taskLeadProfiles"]
-                : {},
-            });
-            const configPath = await writeOpenCodeConfig(config, options.configDir);
+            const profileReasoningResult = hasProfileReasoningAssignments ? applyLiteTaskLeadProfileReasoningEffortConfig(
+              liteConfig,
+              profileReasoningEffortAssignments,
+            ) : { changed: [], skipped: [] };
+            const liteConfigPath = await writeLiteConfigFile(liteConfig, options.configDir);
+            const updatedAgents = await updateGeneratedAgentMarkdownFiles(liteConfig, importedPool, options.configDir);
+            const updatedEffectiveConfig = withLiteConfigAppliedToOpenCodeConfig(
+              withConfiguredTaskLeadProfiles(config, options),
+              liteConfig,
+            );
 
             return [
               formatModelConfigReport({
@@ -888,14 +986,32 @@ If no provider models are found, tell the user to configure or connect OpenCode 
                 changed: result.changed,
                 skipped: result.skipped,
                 warnings: result.warnings,
-                profileChanged: profileResult.changed,
-                profileSkipped: profileResult.skipped,
-                profileWarnings: profileResult.warnings,
+                profileChanged: profileLiteResult.changed,
+                profileSkipped: profileLiteResult.skipped,
+                profileWarnings: profileLiteResult.warnings,
                 reasoningChanged: reasoningResult.changed,
                 reasoningSkipped: reasoningResult.skipped,
               }),
+              ...(profileReasoningResult.changed.length > 0
+                ? [
+                  "",
+                  "Task Lead profile reasoning effort changes applied:",
+                  ...profileReasoningResult.changed.map((change) => (
+                    `- ${change.profile}: ${change.previous ?? "<unset>"} -> ${change.next}${change.requested ? ` (requested ${change.requested})` : ""}`
+                  )),
+                ]
+                : []),
+              ...(profileReasoningResult.skipped.length > 0
+                ? [
+                  "",
+                  "Task Lead profile reasoning effort skipped:",
+                  ...profileReasoningResult.skipped.map((item) => `- ${item.profile}: ${item.reason}`),
+                ]
+                : []),
               "",
-              `Updated ${configPath}. Restart OpenCode or start a new session if the active TUI keeps old model state.`,
+              `Updated ${liteConfigPath}.`,
+              `Updated agent markdown files: ${updatedAgents.length > 0 ? updatedAgents.join(", ") : "none"}.`,
+              "Restart OpenCode or start a new session if the active TUI keeps old model state.",
             ].join("\n");
           }
 

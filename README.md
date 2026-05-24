@@ -83,6 +83,7 @@ opencode debug agent command-lead
 bounded_lite_route
 bounded_lite_plan_dag
 bounded_lite_plan_readiness
+bounded_lite_plan_artifact
 bounded_lite_background
 bounded_lite_runtime_profile
 bounded_lite_model_config
@@ -93,12 +94,13 @@ bounded_lite_model_config
 The installer only copies the files OpenCode needs at runtime:
 
 ```text
-.opencode/agents
 .opencode/plugins
 .opencode/lib
+agents/*.md
+oh-my-lite-openagent.json
 ```
 
-Then it merges the plugin-managed config fragment from `scripts/managed-config.mjs` into the OpenCode global config. The package no longer ships a root `opencode.json`; provider, model, API key, unrelated plugin, and custom agent settings belong to the user's own OpenCode config. If the target config directory only has `opencode.jsonc`, the installer reads and writes `opencode.jsonc` and does not create an extra `opencode.json`; if both `opencode.json` and `opencode.jsonc` exist, `opencode.json` is treated as the active merge target.
+Then it merges only the plugin/command bootstrap fragment from `scripts/managed-config.mjs` into the OpenCode global config. Role definitions are generated as OpenCode markdown agents under `<configDir>/agents/*.md`; role model and reasoning settings live in `<configDir>/oh-my-lite-openagent.json`. The package no longer ships a root `opencode.json`; provider, API key, unrelated plugin, and custom agent settings belong to the user's own OpenCode config. If the target config directory only has `opencode.jsonc`, the installer reads and writes `opencode.jsonc` and does not create an extra `opencode.json`; if both `opencode.json` and `opencode.jsonc` exist, `opencode.json` is treated as the active merge target.
 
 Managed command-line permissions are intentionally permissive for the eight real roles: bash defaults to `allow`, and only dangerous or sensitive commands ask for confirmation. Examples include destructive file operations, system privilege/permission commands, commands that modify git history or remotes, npm publish/remove/version commands, installer commands that actually write OpenCode global config, and pipe/eval forms that execute downloaded content. The disabled OpenCode built-in `build` and `plan` overrides remain fully denied.
 
@@ -220,7 +222,17 @@ Manual adjustments can only write models that exist in the imported pool, for ex
 bounded_lite_model_config({ action: "apply", assignments: { "command-lead": "openai/gpt-5.4", "explore": "openai/gpt-5.4-mini" } })
 ```
 
-The command writes `agent.<role>.model` into the OpenCode config while preserving unrelated provider, model, plugin, and custom agent settings. By default, it rejects models outside the imported pool to prevent AI from inventing provider/model IDs.
+The command writes role model settings to `<configDir>/oh-my-lite-openagent.json` and regenerates `<configDir>/agents/*.md` so OpenCode can load the selected model from markdown agent frontmatter. It does not write `agent.<role>.model` into `opencode.json`. By default, it rejects models outside the imported pool to prevent AI from inventing provider/model IDs.
+
+You can also configure reasoning effort. Oh My Lite accepts common values and aliases such as `minimal`, `low`, `medium`, `high`, `xhigh`, `extra-high`, `max`, and `maximum`. Invalid values fall back to the role/profile default; unsupported provider/model values are downgraded to a safe supported value or omitted so the provider uses its default.
+
+```text
+bounded_lite_model_config({
+  action: "apply",
+  assignments: { "command-lead": "openai/gpt-5.4" },
+  reasoningEffortAssignments: { "command-lead": "max" }
+})
+```
 
 The same command can also preview and write Task Lead profile models without adding real agents. Profiles are selected from `plan.subtasks[].attributes`; currently they are used as dispatch metadata unless the runtime supports per-task model override:
 
@@ -243,6 +255,11 @@ bounded_lite_model_config({
     "code": "opencode/claude-sonnet-4-6",
     "quick": "opencode-go/minimax-m2.7-highspeed",
     "visual": "google/gemini-3.1-pro"
+  },
+  taskLeadProfileReasoningEffortAssignments: {
+    "code": "medium",
+    "deep": "xhigh",
+    "risk-high": "max"
   }
 })
 ```
@@ -277,19 +294,34 @@ The installer writes a backup before modifying global config:
 
 ```text
 opencode.json.bak
+opencode.jsonc.bak
+oh-my-lite-openagent.json.bak
+agents/<role>.md.bak
 ```
+
+Restore the file that was active in the installer output. If the installer reported `opencode.json`, restore `opencode.json`; if it reported `opencode.jsonc`, restore `opencode.jsonc`.
 
 Restore on Linux/macOS:
 
 ```bash
 cp ~/.config/opencode/opencode.json.bak ~/.config/opencode/opencode.json
+# If your active config is JSONC:
+cp ~/.config/opencode/opencode.jsonc.bak ~/.config/opencode/opencode.jsonc
+# If you also want to restore role/profile model settings:
+cp ~/.config/opencode/oh-my-lite-openagent.json.bak ~/.config/opencode/oh-my-lite-openagent.json
 ```
 
 Restore on Windows PowerShell:
 
 ```powershell
 Copy-Item "$env:APPDATA\opencode\opencode.json.bak" "$env:APPDATA\opencode\opencode.json" -Force
+# If your active config is JSONC:
+Copy-Item "$env:APPDATA\opencode\opencode.jsonc.bak" "$env:APPDATA\opencode\opencode.jsonc" -Force
+# If you also want to restore role/profile model settings:
+Copy-Item "$env:APPDATA\opencode\oh-my-lite-openagent.json.bak" "$env:APPDATA\opencode\oh-my-lite-openagent.json" -Force
 ```
+
+Role markdown agent backups live next to the generated agent files as `agents/<role>.md.bak`; restore only the roles you intentionally want to roll back.
 
 Remove local development artifacts:
 
@@ -313,6 +345,7 @@ Use the current plugin version. Tool names must not contain dots. Valid tool nam
 bounded_lite_route
 bounded_lite_plan_dag
 bounded_lite_plan_readiness
+bounded_lite_plan_artifact
 bounded_lite_background
 bounded_lite_runtime_profile
 bounded_lite_model_config

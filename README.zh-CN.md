@@ -85,6 +85,7 @@ opencode debug agent command-lead
 bounded_lite_route
 bounded_lite_plan_dag
 bounded_lite_plan_readiness
+bounded_lite_plan_artifact
 bounded_lite_background
 bounded_lite_runtime_profile
 bounded_lite_model_config
@@ -97,12 +98,13 @@ bounded_lite_model_config
 安装器只复制 OpenCode 运行所需文件：
 
 ```text
-.opencode/agents
 .opencode/plugins
 .opencode/lib
+agents/*.md
+oh-my-lite-openagent.json
 ```
 
-然后将 `scripts/managed-config.mjs` 中的插件托管配置片段合并到 OpenCode 全局配置中。包内不再携带根目录 `opencode.json`；provider、model、API key、无关插件和自定义 agent 都属于用户自己的 OpenCode 配置。如果目标配置目录里只有 `opencode.jsonc`，安装器会读写 `opencode.jsonc`，不会额外创建 `opencode.json`；如果 `opencode.json` 和 `opencode.jsonc` 同时存在，则以 `opencode.json` 作为活动合并目标。
+然后只将 `scripts/managed-config.mjs` 中的插件/命令启动片段合并到 OpenCode 全局配置中。角色定义会生成到 OpenCode 原生 markdown agent 文件 `<configDir>/agents/*.md`；角色模型和推理强度配置写入 `<configDir>/oh-my-lite-openagent.json`。包内不再携带根目录 `opencode.json`；provider、API key、无关插件和自定义 agent 都属于用户自己的 OpenCode 配置。如果目标配置目录里只有 `opencode.jsonc`，安装器会读写 `opencode.jsonc`，不会额外创建 `opencode.json`；如果 `opencode.json` 和 `opencode.jsonc` 同时存在，则以 `opencode.json` 作为活动合并目标。
 
 托管的命令行权限对 8 个真实角色默认较宽松：bash 默认 `allow`，只有危险或敏感命令会 `ask`，例如破坏性文件操作、系统提权/权限命令、会修改 git 历史或远端的命令、npm 发布/移除/改版本、真实写入 OpenCode 全局配置的安装器命令，以及下载后直接执行的管道/eval 形式。被禁用覆盖的 OpenCode 内置 `build` 和 `plan` 仍保持全拒绝。
 
@@ -224,7 +226,17 @@ Task Lead profiles 由 `plan.subtasks[].attributes` 选择。它们**不会**新
 bounded_lite_model_config({ action: "apply", assignments: { "command-lead": "openai/gpt-5.4", "explore": "openai/gpt-5.4-mini" } })
 ```
 
-命令会把 `agent.<role>.model` 写入 OpenCode 配置，同时保留无关的 provider、model、插件和自定义 agent 设置。默认会拒绝导入池外的模型，避免 AI 编造 provider/model。
+命令会把角色模型写入 `<configDir>/oh-my-lite-openagent.json`，并重新生成 `<configDir>/agents/*.md`，让 OpenCode 从 markdown agent frontmatter 读取对应模型。它不再把 `agent.<role>.model` 写入 `opencode.json`。默认会拒绝导入池外的模型，避免 AI 编造 provider/model。
+
+也可以配置推理强度。Oh My Lite 接受 `minimal`、`low`、`medium`、`high`、`xhigh`、`extra-high`、`max`、`maximum` 等常见值和别名。非法值会回退到角色/profile 默认值；模型厂商不支持的值会降级到安全支持值，或省略该字段让 provider 使用默认行为。
+
+```text
+bounded_lite_model_config({
+  action: "apply",
+  assignments: { "command-lead": "openai/gpt-5.4" },
+  reasoningEffortAssignments: { "command-lead": "max" }
+})
+```
 
 同一个命令也可以预览和写入 Task Lead profile 模型，而不新增真实 agent。profile 由 `plan.subtasks[].attributes` 选择；当前它们作为派发元数据使用，除非运行时支持 per-task model override：
 
@@ -247,6 +259,11 @@ bounded_lite_model_config({
     "code": "opencode/claude-sonnet-4-6",
     "quick": "opencode-go/minimax-m2.7-highspeed",
     "visual": "google/gemini-3.1-pro"
+  },
+  taskLeadProfileReasoningEffortAssignments: {
+    "code": "medium",
+    "deep": "xhigh",
+    "risk-high": "max"
   }
 })
 ```
@@ -281,19 +298,34 @@ npm run install:opencode
 
 ```text
 opencode.json.bak
+opencode.jsonc.bak
+oh-my-lite-openagent.json.bak
+agents/<role>.md.bak
 ```
+
+恢复时应恢复安装器输出中显示的活动配置文件。如果安装器使用 `opencode.json`，恢复 `opencode.json`；如果使用 `opencode.jsonc`，恢复 `opencode.jsonc`。
 
 Linux/macOS 恢复方式：
 
 ```bash
 cp ~/.config/opencode/opencode.json.bak ~/.config/opencode/opencode.json
+# 如果你的活动配置是 JSONC：
+cp ~/.config/opencode/opencode.jsonc.bak ~/.config/opencode/opencode.jsonc
+# 如果还要恢复角色/profile 模型配置：
+cp ~/.config/opencode/oh-my-lite-openagent.json.bak ~/.config/opencode/oh-my-lite-openagent.json
 ```
 
 Windows PowerShell 恢复方式：
 
 ```powershell
 Copy-Item "$env:APPDATA\opencode\opencode.json.bak" "$env:APPDATA\opencode\opencode.json" -Force
+# 如果你的活动配置是 JSONC：
+Copy-Item "$env:APPDATA\opencode\opencode.jsonc.bak" "$env:APPDATA\opencode\opencode.jsonc" -Force
+# 如果还要恢复角色/profile 模型配置：
+Copy-Item "$env:APPDATA\opencode\oh-my-lite-openagent.json.bak" "$env:APPDATA\opencode\oh-my-lite-openagent.json" -Force
 ```
+
+角色 markdown agent 的备份位于生成文件旁边，形如 `agents/<role>.md.bak`；只恢复你明确想回滚的角色。
 
 移除本地开发产物：
 
@@ -317,6 +349,7 @@ Remove-Item -Recurse -Force node_modules, dist
 bounded_lite_route
 bounded_lite_plan_dag
 bounded_lite_plan_readiness
+bounded_lite_plan_artifact
 bounded_lite_background
 bounded_lite_runtime_profile
 bounded_lite_model_config

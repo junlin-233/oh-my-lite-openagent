@@ -18,6 +18,12 @@ import {
   summarizeRoleModels,
   summarizeTaskLeadProfileModels,
 } from "../../.opencode/lib/runtime/model-config.js";
+import {
+  applyLiteRoleReasoningEffortConfig,
+  createDefaultLiteConfig,
+  normalizeLiteReasoningEffort,
+  resolveSupportedReasoningEffort,
+} from "../../.opencode/lib/runtime/lite-config.js";
 
 describe("role model configuration", () => {
   it("lists provider models from OpenCode config", () => {
@@ -367,7 +373,7 @@ describe("role model configuration", () => {
       "command-lead": "high",
       explore: "low",
       unknown: "high",
-      "plan-builder": "max",
+      "plan-builder": "invalid-effort",
     });
 
     expect(result.changed).toEqual([
@@ -376,7 +382,7 @@ describe("role model configuration", () => {
     ]);
     expect(result.skipped).toEqual([
       { role: "unknown", reason: "unknown role" },
-      { role: "plan-builder", reason: "reasoningEffort must be minimal, low, medium, or high" },
+      { role: "plan-builder", reason: "reasoningEffort must be minimal, low, medium, high, xhigh, or max" },
     ]);
     expect(summarizeRoleModels(config).find((role) => role.role === "explore")).toMatchObject({
       configuredReasoningEffort: "low",
@@ -393,6 +399,39 @@ describe("role model configuration", () => {
       "command-lead": "high",
       explore: "low",
     });
+  });
+
+  it("normalizes extended lite reasoning effort values and falls back on invalid input", () => {
+    expect(normalizeLiteReasoningEffort("xhigh")).toBe("xhigh");
+    expect(normalizeLiteReasoningEffort("extra-high")).toBe("xhigh");
+    expect(normalizeLiteReasoningEffort("maximum")).toBe("max");
+    expect(normalizeLiteReasoningEffort("huge")).toBeUndefined();
+
+    const liteConfig = createDefaultLiteConfig();
+    const result = applyLiteRoleReasoningEffortConfig(liteConfig, {
+      "command-lead": "max",
+      explore: "bad-value",
+    });
+
+    expect(result.changed).toEqual([
+      { role: "command-lead", next: "max" },
+      { role: "explore", next: "low", requested: "bad-value" },
+    ]);
+    expect(liteConfig.roleReasoningEffort["command-lead"]).toBe("max");
+    expect(liteConfig.roleReasoningEffort.explore).toBe("low");
+  });
+
+  it("downgrades unsupported reasoning effort to a provider-safe value", () => {
+    expect(resolveSupportedReasoningEffort({
+      model: { provider: "openai", model: "gpt-5", id: "openai/gpt-5" },
+      requested: "max",
+      fallback: "high",
+    })).toBe("high");
+    expect(resolveSupportedReasoningEffort({
+      model: { provider: "custom", model: "unknown", id: "custom/unknown" },
+      requested: "max",
+      fallback: "high",
+    })).toBeUndefined();
   });
 
   it("resolves automatic role model assignments from available provider models", () => {

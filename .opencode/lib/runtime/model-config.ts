@@ -86,7 +86,7 @@ export type ModelOrigin =
   | "configured-model"
   | "credential-provider-fallback";
 
-export type ReasoningEffort = "minimal" | "low" | "medium" | "high";
+export type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export interface ModelPoolPolicy {
   source?: ModelProviderSource | "all";
@@ -576,7 +576,7 @@ export function applyRoleReasoningEffortConfig(
 
     const effort = normalizeReasoningEffort(effortValue);
     if (!effort) {
-      skipped.push({ role, reason: "reasoningEffort must be minimal, low, medium, or high" });
+      skipped.push({ role, reason: "reasoningEffort must be minimal, low, medium, high, xhigh, or max" });
       continue;
     }
 
@@ -901,10 +901,23 @@ export function normalizeReasoningEffort(value: unknown): ReasoningEffort | unde
     normalized === "minimal" ||
     normalized === "low" ||
     normalized === "medium" ||
-    normalized === "high"
+    normalized === "high" ||
+    normalized === "xhigh" ||
+    normalized === "max"
   ) {
     return normalized;
   }
+
+  if (normalized === "none") return "minimal";
+  if (normalized === "med") return "medium";
+  if (
+    normalized === "x-high" ||
+    normalized === "extra-high" ||
+    normalized === "extra_high" ||
+    normalized === "very-high" ||
+    normalized === "very_high"
+  ) return "xhigh";
+  if (normalized === "maximum") return "max";
 
   return undefined;
 }

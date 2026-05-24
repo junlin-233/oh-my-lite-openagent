@@ -56,6 +56,15 @@ describe("delegation boundaries", () => {
     expect(taskRules("result-review")).toEqual({ "*": "deny", explore: "allow" });
   });
 
+  it("allows Plan Builder to write plan artifacts directly", () => {
+    expect(config.agent["plan-builder"]?.permission?.edit).toEqual({ "*": "allow" });
+    expect(config.agent["deep-plan-builder"]?.permission?.edit).toEqual({
+      "*": "deny",
+      ".liteagent/**": "allow",
+      "**/.liteagent/**": "allow",
+    });
+  });
+
   it("denies delegation through disabled OpenCode built-in modes", () => {
     expect(taskRules("build")).toEqual({ "*": "deny" });
     expect(taskRules("plan")).toEqual({ "*": "deny" });
@@ -181,6 +190,8 @@ describe("delegation boundaries", () => {
     const globalBash = config.permission?.bash;
     expect(typeof globalBash).toBe("object");
     if (typeof globalBash !== "object" || globalBash === null) return;
+
+    expect(config.agent["command-lead"]?.permission?.bash).toEqual(globalBash);
 
     for (const agentName of [
       "command-lead",

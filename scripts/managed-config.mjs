@@ -121,7 +121,8 @@ export const MANAGED_CONFIG = {
           "librarian": "allow",
           "plan-review": "allow",
           "result-review": "allow"
-        }
+        },
+        "bash": { ...PERMISSIVE_BASH_PERMISSION }
       }
     },
     "plan-builder": {
@@ -136,7 +137,7 @@ export const MANAGED_CONFIG = {
           "plan-review": "allow"
         },
         "edit": {
-          "*": "deny"
+          "*": "allow"
         },
         "bash": { ...PERMISSIVE_BASH_PERMISSION }
       }
@@ -154,7 +155,9 @@ export const MANAGED_CONFIG = {
           "plan-review": "allow"
         },
         "edit": {
-          "*": "deny"
+          "*": "deny",
+          ".liteagent/**": "allow",
+          "**/.liteagent/**": "allow"
         },
         "bash": { ...PERMISSIVE_BASH_PERMISSION }
       }

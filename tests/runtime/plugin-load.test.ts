@@ -114,7 +114,7 @@ describe("plugin safety", () => {
     }
   });
 
-  it("writes model config updates back to opencode.jsonc when that is the existing config", async () => {
+  it("writes model config updates to oh-my-lite-openagent.json and generated agent markdown", async () => {
     const configDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-plugin-jsonc-"));
 
     try {
@@ -128,6 +128,7 @@ describe("plugin safety", () => {
           },
         }\n`,
       );
+      const agentsDir = path.join(configDir, "agents");
 
       const hooks = createBoundedLitePlugin(
         { directory: process.cwd() },
@@ -137,6 +138,7 @@ describe("plugin safety", () => {
         {
           action: "apply",
           assignments: { "command-lead": "openai/gpt-5.4" },
+          reasoningEffortAssignments: { "command-lead": "max" },
           allowUnavailableModels: true,
         },
         {
@@ -144,12 +146,19 @@ describe("plugin safety", () => {
           client: {},
         },
       );
-      const writtenConfig = JSON.parse(await readFile(jsoncPath, "utf8"));
+      const writtenConfigText = await readFile(jsoncPath, "utf8");
+      const liteConfigPath = path.join(configDir, "oh-my-lite-openagent.json");
+      const writtenLiteConfig = JSON.parse(await readFile(liteConfigPath, "utf8"));
+      const generatedAgent = await readFile(path.join(agentsDir, "command-lead.md"), "utf8");
 
-      expect(String(output)).toContain(`Updated ${jsoncPath}`);
-      expect(writtenConfig.agent["command-lead"].model).toBe("openai/gpt-5.4");
+      expect(String(output)).toContain(`Updated ${liteConfigPath}`);
+      expect(writtenConfigText).not.toContain('"model": "openai/gpt-5.4"');
+      expect(writtenLiteConfig.roleModels["command-lead"]).toBe("openai/gpt-5.4");
+      expect(writtenLiteConfig.roleReasoningEffort["command-lead"]).toBe("max");
+      expect(generatedAgent).toContain("model: openai/gpt-5.4");
+      expect(generatedAgent).toContain("reasoningEffort: high");
       expect(await pathExists(path.join(configDir, "opencode.json"))).toBe(false);
-      expect(await pathExists(`${jsoncPath}.bak`)).toBe(true);
+      expect(await pathExists(`${liteConfigPath}.bak`)).toBe(true);
     } finally {
       await rm(configDir, { recursive: true, force: true });
     }

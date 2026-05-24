@@ -8,6 +8,7 @@ import { MANAGED_CONFIG } from "./managed-config.mjs";
 
 const PLUGIN_FILE = "bounded-lite.ts";
 const MANAGED_DIRS = ["agents", "plugins", "lib"];
+const LITE_CONFIG_FILE = "oh-my-lite-openagent.json";
 const DEFAULT_PLUGIN_OPTIONS = { mode: "full" };
 const MANAGED_COMMAND_NAMES = new Set([
   "agent-models",
@@ -660,6 +661,85 @@ function mergeManagedAgent(sourceAgent, existingAgent) {
   };
 }
 
+function createDefaultLiteConfig() {
+  return {
+    schemaVersion: 1,
+    roleModels: {},
+    roleReasoningEffort: {},
+    taskLeadProfiles: {},
+    modelPoolPolicy: {
+      source: "all",
+      allowCodexBackend: false,
+    },
+  };
+}
+
+function normalizeReasoningEffort(value) {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase().replace(/\s+/g, "-");
+  if (normalized === "none") return "minimal";
+  if (["minimal", "low", "medium", "high", "xhigh", "max"].includes(normalized)) return normalized;
+  if (normalized === "med") return "medium";
+  if (["x-high", "extra-high", "extra_high", "very-high", "very_high"].includes(normalized)) return "xhigh";
+  if (normalized === "maximum") return "max";
+  return undefined;
+}
+
+function mergeLiteConfig(existingLiteConfig, existingOpenCodeConfig) {
+  const liteConfig = {
+    ...createDefaultLiteConfig(),
+    ...(isRecord(existingLiteConfig) ? existingLiteConfig : {}),
+    roleModels: {
+      ...(isRecord(existingLiteConfig?.roleModels) ? existingLiteConfig.roleModels : {}),
+    },
+    roleReasoningEffort: {
+      ...(isRecord(existingLiteConfig?.roleReasoningEffort) ? existingLiteConfig.roleReasoningEffort : {}),
+    },
+    taskLeadProfiles: {
+      ...(isRecord(existingLiteConfig?.taskLeadProfiles) ? existingLiteConfig.taskLeadProfiles : {}),
+    },
+    modelPoolPolicy: {
+      source: "all",
+      allowCodexBackend: false,
+      ...(isRecord(existingLiteConfig?.modelPoolPolicy) ? existingLiteConfig.modelPoolPolicy : {}),
+    },
+  };
+  const agents = isRecord(existingOpenCodeConfig.agent) ? existingOpenCodeConfig.agent : {};
+
+  for (const roleName of MANAGED_AGENT_NAMES) {
+    if (roleName === "build" || roleName === "plan") continue;
+    const agent = isRecord(agents[roleName]) ? agents[roleName] : {};
+    if (!liteConfig.roleModels[roleName] && typeof agent.model === "string" && agent.model.includes("/")) {
+      liteConfig.roleModels[roleName] = agent.model;
+    }
+    const effort = normalizeReasoningEffort(agent.reasoningEffort);
+    if (!liteConfig.roleReasoningEffort[roleName] && effort) {
+      liteConfig.roleReasoningEffort[roleName] = effort;
+    }
+  }
+
+  const legacyProfiles = isRecord(existingOpenCodeConfig.taskLeadProfiles)
+    ? existingOpenCodeConfig.taskLeadProfiles
+    : {};
+  for (const [profileName, profileValue] of Object.entries(legacyProfiles)) {
+    if (!isRecord(profileValue)) continue;
+    const profile = isRecord(liteConfig.taskLeadProfiles[profileName])
+      ? { ...liteConfig.taskLeadProfiles[profileName] }
+      : {};
+    if (!profile.model && typeof profileValue.model === "string" && profileValue.model.includes("/")) {
+      profile.model = profileValue.model;
+    }
+    const effort = normalizeReasoningEffort(profileValue.reasoningEffort);
+    if (!profile.reasoningEffort && effort) profile.reasoningEffort = effort;
+    if (Array.isArray(profileValue.fallbackModels) && !profile.fallbackModels) {
+      profile.fallbackModels = profileValue.fallbackModels.filter((item) => typeof item === "string");
+    }
+    if (Object.keys(profile).length > 0) liteConfig.taskLeadProfiles[profileName] = profile;
+  }
+
+  return liteConfig;
+}
+
 function readManagedPluginOptions(config) {
   const plugins = Array.isArray(config.plugin)
     ? config.plugin
@@ -696,13 +776,6 @@ function mergeConfig(existingConfig, sourceConfig, configDir) {
     relativePluginSpec(configDir, taskLeadProfiles),
   ];
   const existingAgents = isRecord(existingConfig.agent) ? existingConfig.agent : {};
-  const sourceAgents = isRecord(sourceConfig.agent) ? sourceConfig.agent : {};
-  const managedAgents = Object.fromEntries(
-    Object.entries(sourceAgents).map(([agentName, sourceAgent]) => [
-      agentName,
-      mergeManagedAgent(sourceAgent, existingAgents[agentName]),
-    ]),
-  );
   const customAgents = Object.fromEntries(
     Object.entries(existingConfig.agent ?? {}).filter(([agentName]) => (
       !MANAGED_AGENT_NAMES.has(agentName)
@@ -723,10 +796,7 @@ function mergeConfig(existingConfig, sourceConfig, configDir) {
       ),
       ...(sourceConfig.command ?? {}),
     },
-    agent: {
-      ...managedAgents,
-      ...customAgents,
-    },
+    ...(Object.keys(customAgents).length > 0 ? { agent: customAgents } : {}),
   };
 }
 
@@ -746,6 +816,71 @@ function applyModelAssignments(config, assignments) {
   return config;
 }
 
+function applyLiteModelAssignments(liteConfig, assignments) {
+  for (const [role, model] of Object.entries(assignments)) {
+    if (typeof model !== "string" || !MANAGED_AGENT_NAMES.has(role)) continue;
+    if (role === "build" || role === "plan") continue;
+    liteConfig.roleModels[role] = model;
+  }
+  return liteConfig;
+}
+
+function yamlScalar(value) {
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "number") return String(value);
+  if (typeof value === "string" && /^[a-zA-Z0-9_-]+$/.test(value)) return value;
+  return JSON.stringify(value);
+}
+
+function yamlLines(value, indent = 0) {
+  const prefix = " ".repeat(indent);
+  if (!isRecord(value)) return [`${prefix}${yamlScalar(value)}`];
+  const lines = [];
+  for (const [key, child] of Object.entries(value)) {
+    const yamlKey = /^[a-zA-Z0-9_-]+$/.test(key) ? key : JSON.stringify(key);
+    if (isRecord(child)) {
+      lines.push(`${prefix}${yamlKey}:`);
+      lines.push(...yamlLines(child, indent + 2));
+    } else {
+      lines.push(`${prefix}${yamlKey}: ${yamlScalar(child)}`);
+    }
+  }
+  return lines;
+}
+
+function agentFrontmatter(agent, liteConfig, agentName) {
+  const frontmatter = { ...agent };
+  delete frontmatter.prompt;
+  const model = liteConfig.roleModels[agentName];
+  const reasoningEffort = liteConfig.roleReasoningEffort[agentName];
+  if (model) frontmatter.model = model;
+  if (reasoningEffort) frontmatter.reasoningEffort = reasoningEffort;
+  return yamlLines(frontmatter).join("\n");
+}
+
+async function writeManagedAgentMarkdownFiles(rootDir, configDir, liteConfig, dryRun) {
+  const targetAgentsDir = path.join(configDir, "agents");
+  if (!dryRun) await mkdir(targetAgentsDir, { recursive: true });
+
+  const sourceAgents = isRecord(MANAGED_CONFIG.agent) ? MANAGED_CONFIG.agent : {};
+  for (const [agentName, agent] of Object.entries(sourceAgents)) {
+    if (!isRecord(agent)) continue;
+    const promptRef = typeof agent.prompt === "string" ? agent.prompt.match(/^\{file:(.*)\}$/)?.[1] : undefined;
+    let promptText = "";
+    if (promptRef) {
+      promptText = await readFile(path.resolve(rootDir, promptRef), "utf8");
+    } else {
+      promptText = `# ${agentName}\n`;
+    }
+    const content = `---\n${agentFrontmatter(agent, liteConfig, agentName)}\n---\n\n${promptText.trimEnd()}\n`;
+    const targetPath = path.join(targetAgentsDir, `${agentName}.md`);
+    if (!dryRun) {
+      await writeFile(`${targetPath}.bak`, await fileExists(targetPath) ? await readFile(targetPath, "utf8") : "");
+      await writeFile(targetPath, content);
+    }
+  }
+}
+
 async function writeJson(filePath, value, dryRun) {
   if (dryRun) return;
   await mkdir(path.dirname(filePath), { recursive: true });
@@ -763,6 +898,9 @@ export async function install(options = {}) {
   const sourceConfig = MANAGED_CONFIG;
   const targetConfigPath = await resolveTargetConfigPath(configDir);
   const existingConfig = await readJsonIfExists(targetConfigPath);
+  const liteConfigPath = path.join(configDir, LITE_CONFIG_FILE);
+  const existingLiteConfig = await readJsonIfExists(liteConfigPath);
+  let liteConfig = mergeLiteConfig(existingLiteConfig, existingConfig);
   let mergedConfig = mergeConfig(existingConfig, sourceConfig, configDir);
   const sourceOpenCodeDir = path.join(rootDir, ".opencode");
   const targetOpenCodeDir = path.join(configDir, ".opencode");
@@ -786,12 +924,12 @@ export async function install(options = {}) {
       console.log(formatModelAssignments(result));
 
       if (Object.keys(result.assignments).length > 0) {
-        mergedConfig = applyModelAssignments(mergedConfig, result.assignments);
+        liteConfig = applyLiteModelAssignments(liteConfig, result.assignments);
 
         if (!dryRun) {
-          console.log("  Model assignments will be written to the OpenCode config.");
+          console.log(`  Model assignments will be written to ${LITE_CONFIG_FILE}.`);
         } else {
-          console.log("  [Dry run] Model assignments would be written to the OpenCode config.");
+          console.log(`  [Dry run] Model assignments would be written to ${LITE_CONFIG_FILE}.`);
         }
       }
 
@@ -803,10 +941,13 @@ export async function install(options = {}) {
   }
 
   await writeJson(targetConfigPath, mergedConfig, dryRun);
+  await writeJson(liteConfigPath, liteConfig, dryRun);
+  await writeManagedAgentMarkdownFiles(rootDir, configDir, liteConfig, dryRun);
 
   return {
     configDir,
     configPath: targetConfigPath,
+    liteConfigPath,
     plugin: pathToFileURL(path.join(targetOpenCodeDir, "plugins", PLUGIN_FILE)).href,
     dryRun,
   };
@@ -817,6 +958,7 @@ async function main() {
   const result = await install(args);
 
   console.log(`OpenCode config: ${result.configPath}`);
+  console.log(`Oh My Lite config: ${result.liteConfigPath}`);
   console.log(`Bounded lite plugin: ${result.plugin}`);
 
   if (args.interactive) {

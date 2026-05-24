@@ -20,6 +20,7 @@ const config = managedConfigModule.MANAGED_CONFIG as {
       color?: string;
       prompt?: string;
       model?: string;
+      permission?: Record<string, unknown>;
     }
   >;
 };
@@ -164,6 +165,8 @@ describe("OpenCode agent topology", () => {
     }
 
     expect(promptText).toContain("Do not use hidden initiator markers");
+    expect(promptText).toContain("Use the smallest complete assignment");
+    expect(promptText).toContain("Do not over-explain routine context");
     expect(promptText).toContain("Do not perform whole-repo unbounded search");
     expect(promptText).toContain("Result Review");
     expect(promptText).toContain("never a Task Lead child return");
@@ -175,9 +178,14 @@ describe("OpenCode agent topology", () => {
 
     expect(promptText).toContain("## Routing Thresholds");
     expect(promptText).toContain("## Repository Evidence Gate");
+    expect(promptText).toContain("Prefer the lightest successful path");
+    expect(promptText).toContain("do not narrate obvious mechanics");
     expect(promptText).toContain("reading large files, comparing many files");
-    expect(promptText).toContain("gather scoped Explore evidence");
+    expect(promptText).toContain("gather scoped repository evidence");
+    expect(promptText).toContain("Direct local inspection is acceptable for one or two small files");
+    expect(promptText).toContain("narrow role-instruction wording edits");
     expect(promptText).toContain("Execute directly when all of these are true");
+    expect(promptText).toContain("keep visible commentary minimal");
     expect(promptText).toContain("Route to Plan Builder when any of these are true");
     expect(promptText).toContain("Route to Deep Plan Builder when any of these are true");
     expect(promptText).toContain("lower-strength model");
@@ -212,6 +220,8 @@ describe("OpenCode agent topology", () => {
     expect(promptText).toContain(".liteagent/plan-index.jsonl");
     expect(promptText).toContain("bounded_lite_plan_artifact");
     expect(promptText).toContain("Do not write plan artifacts under `.opencode/`");
+    expect(promptText).toContain("Plan Builder may directly write and maintain final plan artifacts");
+    expect(promptText).toContain("deletion/removal must only happen when the user explicitly asks");
   });
 
   it("keeps Plan Builder aligned with the v2.1 plan spec", () => {
@@ -229,27 +239,35 @@ describe("OpenCode agent topology", () => {
     expect(promptText).toContain("[User Confirmed]");
     expect(promptText).toContain("[Repo Observed]");
     expect(promptText).toContain("[Inferred]");
-    expect(promptText).toContain("[Open Question]");
     expect(promptText).toContain("basis");
-    expect(promptText).toContain("failure_if_false");
-    expect(promptText).toContain("Not Applicable");
-    expect(promptText).toContain("Deferred");
-    expect(promptText).toContain("Unknown Yet");
-    expect(promptText).toContain("5 turns");
+    expect(promptText).toContain("Final plan artifacts must not contain an `open_questions` section or `[Open Question]` tags");
+    expect(promptText).toContain("Required compact sections");
+    expect(promptText).toContain("one-to-two screen plan");
+    expect(promptText).toContain("adopted assumptions");
+    expect(promptText).toContain("5 clarification turns");
     expect(promptText).toContain("current-state conflicts");
     expect(promptText).toContain("target-state gaps");
-    expect(promptText).toContain("never `reviewed` or `M3`");
+    expect(promptText).toContain("must not be emitted as a final artifact");
     expect(promptText).toContain("recommended_plan_path");
     expect(promptText).toContain(".liteagent/plans/");
+    expect(promptText).toContain("write the final plan artifact yourself");
+    expect(promptText).toContain(".liteagent/plan-index.jsonl");
+    expect(promptText).toContain("Deleting plan artifact files or removing/changing index entries is allowed only when the user explicitly asks");
+    expect(promptText).toContain("does not grant execution dispatch, final approval, or canonical state advancement authority");
   });
 
-  it("requires Deep Plan Builder to return a .liteagent plan path without owning persistence", () => {
+  it("allows Deep Plan Builder to write .liteagent plan artifacts without owning execution", () => {
     const promptText = readPrompt("deep-plan-builder");
 
     expect(promptText).toContain("Match user's language");
     expect(promptText).toContain("recommended_plan_path");
     expect(promptText).toContain(".liteagent/plans/");
-    expect(promptText).toContain("Command Lead owns actual file persistence");
+    expect(promptText).toContain("write and maintain the final detailed plan artifact yourself");
+    expect(promptText).toContain(".liteagent/plan-index.jsonl");
+    expect(config.agent["deep-plan-builder"]?.permission?.edit).toMatchObject({
+      ".liteagent/**": "allow",
+    });
+    expect(promptText).toContain("Direct plan persistence does not grant execution dispatch, final approval, or canonical state advancement authority");
   });
 
   it("requires Task Lead and reviewers to request scoped evidence when needed", () => {

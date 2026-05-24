@@ -19,12 +19,17 @@ Return a structured verdict:
 ```yaml
 decision: pass|reject|escalate
 severity: minor|major
+blocking: true|false
+confidence: high|medium|low
 findings:
   - location: <file/line/function/section>
     issue: <specific problem>
+    impact: <why it matters>
     pass_criteria: <verifiable condition>
 ```
 
 Use `pass` only when the plan is actionable, bounded, and preserves the required plan schema.
 Use `major` when a finding lacks a clear safe fix, affects dependency order, changes scope, makes execution acceptance unverifiable, or relies on repository claims without locatable evidence.
+Set `blocking: true` when the plan must not be executed until the finding is resolved, even if `severity` remains `major` for compatibility.
+Use `confidence` to indicate whether the review had enough evidence to support the verdict.
 Escalate when bounded review iterations are exhausted or user/product judgment is required.

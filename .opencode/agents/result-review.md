@@ -22,12 +22,17 @@ Return a structured verdict:
 ```yaml
 decision: pass|reject|escalate
 severity: minor|major
+blocking: true|false
+confidence: high|medium|low
 findings:
   - location: <file/line/function/output>
     issue: <specific problem>
+    impact: <why it matters>
     pass_criteria: <verifiable condition>
 ```
 
 Use `pass` only when the Command Lead execution summary satisfies the user request and the verification chain is coherent.
 Use `major` when a finding blocks user acceptance, lacks a clear safe fix, or requires Command Lead/user judgment.
+Set `blocking: true` when the result should not be accepted until the finding is resolved, even if `severity` remains `major` for compatibility.
+Use `confidence` to indicate whether the review had enough evidence to support the verdict.
 Escalate when bounded review iterations are exhausted or the result cannot be recovered locally.
