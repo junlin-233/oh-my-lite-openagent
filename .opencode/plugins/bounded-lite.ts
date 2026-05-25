@@ -7,7 +7,11 @@ import {
 import { resolveCategoryRoute } from "../lib/runtime/categories.js";
 import { buildTaskDAG, type TaskDispatchConfig } from "../lib/runtime/plan-dag.js";
 import { validatePlanReadiness } from "../lib/runtime/plan-readiness.js";
-import { writePlanArtifact } from "../lib/runtime/plan-artifact.js";
+import {
+  ensureOpenPlanIndexHealthyOnce,
+  rebuildOpenPlanIndex,
+  writePlanArtifact,
+} from "../lib/runtime/plan-artifact.js";
 import { createRuntimeProfile } from "../lib/runtime/safety.js";
 import {
   applyRoleModelConfig,
@@ -484,6 +488,31 @@ interface ModelConfigResponse {
   report?: string;
 }
 
+type PlanArtifactRequest =
+  | {
+    action: "write";
+    operation: "create" | "update";
+    title?: string;
+    markdown?: string;
+    sessionKey: string;
+    sessionStartedAt: string;
+    filenameHint?: string;
+    generatedBy: string;
+    planId?: string;
+    status?: "draft" | "reviewed" | "blocked";
+    maturityLevel?: string;
+    targetPlanRef?: string;
+    sourceSessionKey?: string;
+    sourcePlanRef?: string;
+    replacesSessionKey?: string;
+    replacesPlanRef?: string;
+  }
+  | {
+    action: "rebuild";
+    generatedBy?: string;
+    reason?: string;
+  };
+
 function toToolOutput(value: unknown): { output: string; metadata: Record<string, unknown> } {
   return {
     output: typeof value === "string" ? value : JSON.stringify(value),
@@ -554,6 +583,193 @@ function parseModelConfigError(error: unknown, action: ModelConfigAction): Model
   };
 }
 
+function parsePlanArtifactError(error: unknown, action: "write" | "rebuild" = "write"): {
+  ok: false;
+  action: "write" | "rebuild";
+  applied: false;
+  code: string;
+  message: string;
+} {
+  const message = error instanceof Error ? error.message : String(error);
+  const match = message.match(/^(PLANART_ERR_[A-Z_]+):\s*(.*)$/);
+
+  return {
+    ok: false,
+    action,
+    applied: false,
+    code: match?.[1] ?? "PLANART_ERR_RUNTIME",
+    message: match?.[2] ?? message,
+  };
+}
+
+function parsePlanArtifactRequest(payload: unknown): PlanArtifactRequest {
+  if (!isRecord(payload)) {
+    throw new Error("PLANART_ERR_INVALID_PAYLOAD: bounded_lite_plan_artifact payload must be an object.");
+  }
+
+  const hasOwn = (key: string): boolean => Object.prototype.hasOwnProperty.call(payload, key);
+
+  const allowedFields = new Set([
+    "action",
+    "operation",
+    "reason",
+    "title",
+    "markdown",
+    "content",
+    "sessionKey",
+    "session_key",
+    "sessionStartedAt",
+    "session_started_at",
+    "filenameHint",
+    "filename_hint",
+    "generatedBy",
+    "generated_by",
+    "planId",
+    "plan_id",
+    "sourceSessionKey",
+    "source_session_key",
+    "sourcePlanRef",
+    "source_plan_ref",
+    "replacesSessionKey",
+    "replaces_session_key",
+    "replacesPlanRef",
+    "replaces_plan_ref",
+    "status",
+    "maturityLevel",
+    "maturity_level",
+    "targetPlanRef",
+    "target_plan_ref",
+  ]);
+
+  for (const key of Object.keys(payload)) {
+    if (!allowedFields.has(key)) {
+      throw new Error(`PLANART_ERR_UNKNOWN_FIELD: unknown field "${key}".`);
+    }
+  }
+
+  const action = readString(payload["action"]);
+  if (!action) {
+    throw new Error("PLANART_ERR_MISSING_ACTION: bounded_lite_plan_artifact requires action.");
+  }
+  if (action !== "write" && action !== "rebuild") {
+    throw new Error("PLANART_ERR_UNKNOWN_ACTION: action must be write or rebuild.");
+  }
+
+  if (action === "rebuild") {
+    const hasAny = (...keys: string[]): boolean => keys.some((key) => hasOwn(key));
+    const rebuildGeneratedBy = readString(payload["generatedBy"]) ?? readString(payload["generated_by"]);
+    const rebuildReason = readString(payload["reason"]);
+
+    if (hasAny("operation")) {
+      throw new Error("PLANART_ERR_REBUILD_OPERATION_FORBIDDEN: rebuild does not accept operation.");
+    }
+    if (hasAny("targetPlanRef", "target_plan_ref")) {
+      throw new Error("PLANART_ERR_REBUILD_TARGET_FORBIDDEN: rebuild does not accept targetPlanRef.");
+    }
+    if (hasAny("title", "markdown", "content")) {
+      throw new Error("PLANART_ERR_REBUILD_WRITE_FIELDS_FORBIDDEN: rebuild does not accept title or markdown fields.");
+    }
+    if (hasAny("sessionKey", "session_key")) {
+      throw new Error("PLANART_ERR_REBUILD_SESSION_FORBIDDEN: rebuild does not accept sessionKey.");
+    }
+    if (hasAny("sessionStartedAt", "session_started_at")) {
+      throw new Error("PLANART_ERR_REBUILD_SESSION_FORBIDDEN: rebuild does not accept sessionStartedAt.");
+    }
+    if (hasAny("filenameHint", "filename_hint")) {
+      throw new Error("PLANART_ERR_REBUILD_WRITE_FIELDS_FORBIDDEN: rebuild does not accept filenameHint.");
+    }
+    if (hasAny("planId", "plan_id")) {
+      throw new Error("PLANART_ERR_REBUILD_WRITE_FIELDS_FORBIDDEN: rebuild does not accept planId.");
+    }
+    if (hasAny("status")) {
+      throw new Error("PLANART_ERR_REBUILD_WRITE_FIELDS_FORBIDDEN: rebuild does not accept status.");
+    }
+    if (hasAny("maturityLevel", "maturity_level")) {
+      throw new Error("PLANART_ERR_REBUILD_WRITE_FIELDS_FORBIDDEN: rebuild does not accept maturityLevel.");
+    }
+
+    return {
+      action: "rebuild",
+      ...(rebuildGeneratedBy ? { generatedBy: rebuildGeneratedBy } : {}),
+      ...(rebuildReason ? { reason: rebuildReason } : {}),
+    };
+  }
+
+  const title = readString(payload["title"]);
+  const markdown = readString(payload["markdown"]) ?? readString(payload["content"]);
+  const operation = readString(payload["operation"]) ?? "create";
+  const sessionKey = readString(payload["sessionKey"]) ?? readString(payload["session_key"]);
+  const sessionStartedAt = readString(payload["sessionStartedAt"]) ?? readString(payload["session_started_at"]);
+  const filenameHint = readString(payload["filenameHint"]) ?? readString(payload["filename_hint"]);
+  const generatedBy = readString(payload["generatedBy"]) ?? readString(payload["generated_by"]);
+  const planId = readString(payload["planId"]) ?? readString(payload["plan_id"]);
+  const sourceSessionKey = readString(payload["sourceSessionKey"]) ?? readString(payload["source_session_key"]);
+  const sourcePlanRef = readString(payload["sourcePlanRef"]) ?? readString(payload["source_plan_ref"]);
+  const replacesSessionKey = readString(payload["replacesSessionKey"]) ?? readString(payload["replaces_session_key"]);
+  const replacesPlanRef = readString(payload["replacesPlanRef"]) ?? readString(payload["replaces_plan_ref"]);
+  const maturityLevel = readString(payload["maturityLevel"]) ?? readString(payload["maturity_level"]);
+  const targetPlanRef = readString(payload["targetPlanRef"]) ?? readString(payload["target_plan_ref"]);
+
+  if (operation !== "create" && operation !== "update") {
+    throw new Error("PLANART_ERR_UNSUPPORTED_OPERATION: operation must be create or update.");
+  }
+
+  if (!sessionKey) throw new Error("PLANART_ERR_MISSING_SESSION_KEY: sessionKey is required.");
+  if (!sessionStartedAt) throw new Error("PLANART_ERR_MISSING_SESSION_STARTED_AT: sessionStartedAt is required.");
+  if (!generatedBy) throw new Error("PLANART_ERR_MISSING_GENERATED_BY: generatedBy is required.");
+
+  const status = readString(payload["status"]);
+  if (status && status !== "draft" && status !== "reviewed" && status !== "blocked") {
+    throw new Error("PLANART_ERR_UNSUPPORTED_STATUS: supported statuses are draft, reviewed, and blocked.");
+  }
+
+  if (operation === "create") {
+    if (!title) throw new Error("PLANART_ERR_MISSING_TITLE: title is required.");
+    if (!markdown) throw new Error("PLANART_ERR_MISSING_MARKDOWN: markdown is required.");
+    if (!filenameHint) throw new Error("PLANART_ERR_MISSING_FILENAME_HINT: filenameHint is required.");
+    if (sourceSessionKey && !sourcePlanRef) {
+      throw new Error("PLANART_ERR_SOURCE_PLAN_REF_REQUIRED: sourceSessionKey requires sourcePlanRef.");
+    }
+    if (replacesSessionKey && !replacesPlanRef) {
+      throw new Error("PLANART_ERR_REPLACEMENT_TARGET_MISSING: replacesSessionKey requires replacesPlanRef.");
+    }
+    if (status && status !== "draft" && status !== "reviewed" && status !== "blocked") {
+      throw new Error("PLANART_ERR_UNSUPPORTED_STATUS: create supports draft, reviewed, or blocked.");
+    }
+  }
+
+  if (operation === "update") {
+    if (sourceSessionKey || sourcePlanRef) {
+      throw new Error("PLANART_ERR_UPDATE_SOURCE_FORBIDDEN: update does not accept sourcePlanRef or sourceSessionKey.");
+    }
+    if (replacesSessionKey || replacesPlanRef) {
+      throw new Error("PLANART_ERR_UPDATE_REPLACEMENT_FORBIDDEN: update does not accept replacesPlanRef or replacesSessionKey.");
+    }
+    if (!markdown && !status) {
+      throw new Error("PLANART_ERR_MISSING_UPDATE_PAYLOAD: update requires markdown/content or status.");
+    }
+  }
+
+  return {
+    action: "write",
+    operation,
+    sessionKey,
+    sessionStartedAt,
+    generatedBy,
+    ...(title ? { title } : {}),
+    ...(markdown ? { markdown } : {}),
+    ...(filenameHint ? { filenameHint } : {}),
+    ...(planId ? { planId } : {}),
+    ...(sourceSessionKey ? { sourceSessionKey } : {}),
+    ...(sourcePlanRef ? { sourcePlanRef } : {}),
+    ...(replacesSessionKey ? { replacesSessionKey } : {}),
+    ...(replacesPlanRef ? { replacesPlanRef } : {}),
+    ...(status === "draft" || status === "reviewed" || status === "blocked" ? { status } : {}),
+    ...(maturityLevel ? { maturityLevel } : {}),
+    ...(targetPlanRef ? { targetPlanRef } : {}),
+  };
+}
+
 function parseModelConfigRequest(payload: unknown): ModelConfigRequest {
   if (!isRecord(payload)) {
     throw new Error("MODELCFG_ERR_INVALID_PAYLOAD: bounded_lite_model_config payload must be an object.");
@@ -621,6 +837,9 @@ export function createBoundedLitePlugin(
     bundledMcpEnabled: options.enableBundledMcp,
   });
   const background = new BackgroundCoordinator();
+  let planArtifactSelfCheckRan = false;
+  let planArtifactSelfCheckFailure: { code: string; message: string } | undefined;
+  let planArtifactSelfCheckPromise: Promise<void> | undefined;
 
   return {
     config() {
@@ -671,46 +890,103 @@ export function createBoundedLitePlugin(
         },
       },
       bounded_lite_plan_artifact: {
-        description: "Persist a Command Lead-approved plan artifact under .liteagent/plans and append .liteagent/plan-index.jsonl.",
+        description: "Persist a Command Lead-approved openplan artifact with create/update semantics, or rebuild openplan/index.jsonl from plan frontmatter.",
         args: {},
         async execute(args, context) {
-          const action = readString(args["action"]) ?? "write";
-          if (action !== "write") {
-            throw new Error("bounded_lite_plan_artifact action must be write.");
+          const requestedAction = readString(args["action"]) === "rebuild" ? "rebuild" : "write";
+
+          try {
+            if (!planArtifactSelfCheckRan) {
+              if (!planArtifactSelfCheckPromise) {
+                planArtifactSelfCheckPromise = (async () => {
+                  try {
+                    await ensureOpenPlanIndexHealthyOnce({
+                      ...(options.configDir ? { configDir: options.configDir } : {}),
+                    });
+                  } catch (error) {
+                    const parsed = parsePlanArtifactError(error);
+                    planArtifactSelfCheckFailure = {
+                      code: parsed.code,
+                      message: `index self-check repair failed: ${parsed.message}; requires follow-up repair`,
+                    };
+                  } finally {
+                    planArtifactSelfCheckRan = true;
+                  }
+                })();
+              }
+
+              await planArtifactSelfCheckPromise;
+            }
+
+            const request = parsePlanArtifactRequest(args);
+            if (request.action === "rebuild") {
+              const rebuilt = await rebuildOpenPlanIndex({
+                ...(options.configDir ? { configDir: options.configDir } : {}),
+                mode: "manual-rebuild",
+                ...(request.generatedBy ? { generatedBy: request.generatedBy } : {}),
+                ...(request.reason ? { reason: request.reason } : {}),
+              });
+
+              planArtifactSelfCheckFailure = undefined;
+              return toToolOutput({
+                ok: true,
+                action: request.action,
+                applied: true,
+                indexPath: rebuilt.indexPath,
+                scannedFileCount: rebuilt.scannedFileCount,
+                rebuiltRecordCount: rebuilt.rebuiltRecordCount,
+                status: rebuilt.status,
+                mode: rebuilt.mode,
+              });
+            }
+
+            if (planArtifactSelfCheckFailure) {
+              return toToolOutput({
+                ok: false,
+                action: request.action,
+                applied: false,
+                code: planArtifactSelfCheckFailure.code,
+                message: planArtifactSelfCheckFailure.message,
+              });
+            }
+
+            const result = await writePlanArtifact({
+              projectRoot: resolveProjectRoot(context),
+              action: request.action,
+              operation: request.operation,
+              sessionKey: request.sessionKey,
+              sessionStartedAt: request.sessionStartedAt,
+              generatedBy: request.generatedBy,
+              ...(request.title ? { title: request.title } : {}),
+              ...(request.markdown ? { markdown: request.markdown } : {}),
+              ...(request.filenameHint ? { filenameHint: request.filenameHint } : {}),
+              ...(request.planId ? { planId: request.planId } : {}),
+              ...(request.sourceSessionKey ? { sourceSessionKey: request.sourceSessionKey } : {}),
+              ...(request.sourcePlanRef ? { sourcePlanRef: request.sourcePlanRef } : {}),
+              ...(request.replacesSessionKey ? { replacesSessionKey: request.replacesSessionKey } : {}),
+              ...(request.replacesPlanRef ? { replacesPlanRef: request.replacesPlanRef } : {}),
+              ...(request.status ? { status: request.status } : {}),
+              ...(request.maturityLevel ? { maturityLevel: request.maturityLevel } : {}),
+              ...(request.targetPlanRef ? { targetPlanRef: request.targetPlanRef } : {}),
+              ...(options.configDir ? { configDir: options.configDir } : {}),
+            });
+
+            return toToolOutput({
+              ok: true,
+              action: request.action,
+              applied: true,
+              planId: result.planId,
+              path: result.path,
+              indexPath: result.indexPath,
+              sessionKey: result.sessionKey,
+              bytes: result.bytes,
+              status: result.status,
+              operation: result.operation,
+              rebuildTriggered: result.rebuildTriggered,
+            });
+          } catch (error) {
+            return toToolOutput(parsePlanArtifactError(error, requestedAction));
           }
-
-          const title = readString(args["title"]);
-          const markdown = readString(args["markdown"]) ?? readString(args["content"]);
-          if (!title || !markdown) {
-            throw new Error("bounded_lite_plan_artifact write requires title and markdown.");
-          }
-
-          const planId = readString(args["planId"]) ?? readString(args["plan_id"]);
-          const maturityLevel = readString(args["maturityLevel"]) ?? readString(args["maturity_level"]);
-          const generatedBy = readString(args["generatedBy"]) ?? readString(args["generated_by"]);
-          const requestedPath = readString(args["path"]) ?? readString(args["recommended_plan_path"]);
-          const result = await writePlanArtifact({
-            projectRoot: resolveProjectRoot(context),
-            title,
-            markdown,
-            artifactKind: args["artifactKind"] === "detailed-plan" ? "detailed-plan" : "plan-skeleton",
-            status: args["status"] === "reviewed" || args["status"] === "blocked" ? args["status"] : "draft",
-            overwrite: args["overwrite"] === true,
-            ...(planId ? { planId } : {}),
-            ...(maturityLevel ? { maturityLevel } : {}),
-            ...(generatedBy ? { generatedBy } : {}),
-            ...(requestedPath ? { requestedPath } : {}),
-          });
-
-          return toToolOutput([
-            "Oh My Lite OpenAgent plan artifact persisted",
-            "",
-            `Plan ID: ${result.planId}`,
-            `Path: ${result.relativePath}`,
-            `Index: .liteagent/plan-index.jsonl`,
-            `Bytes: ${result.bytes}`,
-            `Overwritten: ${result.overwritten ? "yes" : "no"}`,
-          ].join("\n"));
         },
       },
       bounded_lite_background: {

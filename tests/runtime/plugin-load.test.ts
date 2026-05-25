@@ -1,5 +1,6 @@
 import { createBoundedLitePlugin } from "../../.opencode/plugins/bounded-lite.js";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { writePlanArtifact } from "../../.opencode/lib/runtime/plan-artifact.js";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -9,6 +10,18 @@ async function execModelConfig(
   context: any,
 ): Promise<any> {
   const raw = await hooks.tool?.bounded_lite_model_config?.execute(args, context);
+  if (raw && typeof raw === "object" && "output" in raw && typeof (raw as { output?: unknown }).output === "string") {
+    return JSON.parse((raw as { output: string }).output);
+  }
+  return raw;
+}
+
+async function execPlanArtifact(
+  hooks: ReturnType<typeof createBoundedLitePlugin>,
+  args: Record<string, unknown>,
+  context: any,
+): Promise<any> {
+  const raw = await hooks.tool?.bounded_lite_plan_artifact?.execute(args, context);
   if (raw && typeof raw === "object" && "output" in raw && typeof (raw as { output?: unknown }).output === "string") {
     return JSON.parse((raw as { output: string }).output);
   }
@@ -204,6 +217,749 @@ describe("plugin safety", () => {
 
     expect(output.ok).toBe(false);
     expect(output.validation_errors?.[0]?.code).toBe("MODELCFG_ERR_MISSING_ACTION");
+  });
+
+  it("returns structured openplan create result for bounded_lite_plan_artifact", async () => {
+    const configDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-planart-"));
+    const previousConfigDir = process.env.OPENCODE_CONFIG_DIR;
+
+    try {
+      process.env.OPENCODE_CONFIG_DIR = configDir;
+      const hooks = createBoundedLitePlugin({ directory: process.cwd() }, { configDir });
+      const output = await execPlanArtifact(
+        hooks,
+        {
+          action: "write",
+          title: "路由方案设计",
+          markdown: "# Plan",
+          sessionKey: "20260518-1030-a1b2c3d4",
+          sessionStartedAt: "2026-05-18T02:30:00Z",
+          filenameHint: "routing-plan.md",
+          generatedBy: "command-lead",
+          planId: "a1b2c3d4",
+          maturityLevel: "M2",
+        },
+        { directory: process.cwd() },
+      ) as {
+        ok: boolean;
+        action: string;
+        applied: boolean;
+        planId: string;
+        path: string;
+        indexPath: string;
+        sessionKey: string;
+        bytes: number;
+        status: string;
+        operation: string;
+      };
+
+      expect(output.ok).toBe(true);
+      expect(output.action).toBe("write");
+      expect(output.applied).toBe(true);
+      expect(output.planId).toBe("a1b2c3d4");
+      expect(output.path).toBe("20260518-1030-a1b2c3d4/routing-plan.md");
+      expect(output.indexPath).toBe("openplan/index.jsonl");
+      expect(output.sessionKey).toBe("20260518-1030-a1b2c3d4");
+      expect(output.bytes).toBeGreaterThan(0);
+      expect(output.status).toBe("draft");
+      expect(output.operation).toBe("create");
+    } finally {
+      if (previousConfigDir === undefined) {
+        delete process.env.OPENCODE_CONFIG_DIR;
+      } else {
+        process.env.OPENCODE_CONFIG_DIR = previousConfigDir;
+      }
+      await rm(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects missing required fields for create bounded_lite_plan_artifact", async () => {
+    const hooks = createBoundedLitePlugin({ directory: process.cwd() });
+    const output = await execPlanArtifact(
+      hooks,
+      { action: "write", title: "A", markdown: "# A" },
+      { directory: process.cwd() },
+    ) as { ok: boolean; code: string; message: string };
+
+    expect(output.ok).toBe(false);
+    expect(output.code).toBe("PLANART_ERR_MISSING_SESSION_KEY");
+    expect(output.message).toContain("sessionKey is required");
+  });
+
+  it("rejects out-of-scope fields and non-write actions for bounded_lite_plan_artifact", async () => {
+    const hooks = createBoundedLitePlugin({ directory: process.cwd() });
+
+    const unknownField = await execPlanArtifact(
+      hooks,
+      {
+        action: "write",
+        title: "A",
+        markdown: "# A",
+        sessionKey: "20260518-1030-a1b2c3d4",
+        sessionStartedAt: "2026-05-18T02:30:00Z",
+        filenameHint: "a.md",
+        generatedBy: "command-lead",
+        unsupportedField: "x",
+      },
+      { directory: process.cwd() },
+    ) as { ok: boolean; code: string; message: string };
+
+    const wrongAction = await execPlanArtifact(
+      hooks,
+      {
+        action: "noop",
+        operation: "update",
+        markdown: "# A",
+        sessionKey: "20260518-1030-a1b2c3d4",
+        sessionStartedAt: "2026-05-18T02:30:00Z",
+        generatedBy: "command-lead",
+      },
+      { directory: process.cwd() },
+    ) as { ok: boolean; code: string; message: string };
+
+    const invalidExtension = await execPlanArtifact(
+      hooks,
+      {
+        action: "write",
+        title: "A",
+        markdown: "# A",
+        sessionKey: "20260518-1030-a1b2c3d4",
+        sessionStartedAt: "2026-05-18T02:30:00Z",
+        filenameHint: "a.txt",
+        generatedBy: "command-lead",
+      },
+      { directory: process.cwd() },
+    ) as { ok: boolean; code: string; message: string };
+
+    expect(unknownField.ok).toBe(false);
+    expect(unknownField.code).toBe("PLANART_ERR_UNKNOWN_FIELD");
+    expect(wrongAction.ok).toBe(false);
+    expect(wrongAction.code).toBe("PLANART_ERR_UNKNOWN_ACTION");
+    expect(invalidExtension.ok).toBe(false);
+    expect(invalidExtension.code).toBe("PLANART_ERR_INVALID_FILENAME_HINT");
+  });
+
+  it("supports same-session update payload for bounded_lite_plan_artifact", async () => {
+    const configDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-planart-update-"));
+    const previousConfigDir = process.env.OPENCODE_CONFIG_DIR;
+
+    try {
+      process.env.OPENCODE_CONFIG_DIR = configDir;
+      const hooks = createBoundedLitePlugin({ directory: process.cwd() }, { configDir });
+
+      const created = await execPlanArtifact(
+        hooks,
+        {
+          action: "write",
+          operation: "create",
+          title: "路由方案设计",
+          markdown: "# Plan",
+          sessionKey: "20260518-1030-a1b2c3d4",
+          sessionStartedAt: "2026-05-18T02:30:00Z",
+          filenameHint: "routing-plan.md",
+          generatedBy: "command-lead",
+          planId: "a1b2c3d4",
+        },
+        { directory: process.cwd() },
+      ) as { path: string };
+
+      const updated = await execPlanArtifact(
+        hooks,
+        {
+          action: "write",
+          operation: "update",
+          targetPlanRef: created.path,
+          markdown: "# Plan\nupdated",
+          status: "reviewed",
+          sessionKey: "20260518-1030-a1b2c3d4",
+          sessionStartedAt: "2026-05-18T02:30:00Z",
+          generatedBy: "command-lead",
+        },
+        { directory: process.cwd() },
+      ) as {
+        ok: boolean;
+        action: string;
+        applied: boolean;
+        path: string;
+        status: string;
+        operation: string;
+      };
+
+      expect(updated.ok).toBe(true);
+      expect(updated.action).toBe("write");
+      expect(updated.applied).toBe(true);
+      expect(updated.path).toBe(created.path);
+      expect(updated.status).toBe("reviewed");
+      expect(updated.operation).toBe("update");
+    } finally {
+      if (previousConfigDir === undefined) {
+        delete process.env.OPENCODE_CONFIG_DIR;
+      } else {
+        process.env.OPENCODE_CONFIG_DIR = previousConfigDir;
+      }
+      await rm(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it("supports cross-session provenance create for bounded_lite_plan_artifact", async () => {
+    const configDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-planart-provenance-"));
+    const previousConfigDir = process.env.OPENCODE_CONFIG_DIR;
+
+    try {
+      process.env.OPENCODE_CONFIG_DIR = configDir;
+      const hooks = createBoundedLitePlugin({ directory: process.cwd() }, { configDir });
+
+      const source = await execPlanArtifact(
+        hooks,
+        {
+          action: "write",
+          operation: "create",
+          title: "Source",
+          markdown: "# Source",
+          sessionKey: "20260518-1130-z9y8x7w6",
+          sessionStartedAt: "2026-05-18T03:30:00Z",
+          filenameHint: "source.md",
+          generatedBy: "command-lead",
+          planId: "a1b2c3d4",
+        },
+        { directory: process.cwd() },
+      ) as { path: string };
+
+      const derived = await execPlanArtifact(
+        hooks,
+        {
+          action: "write",
+          operation: "create",
+          title: "Derived",
+          markdown: "# Derived",
+          sessionKey: "20260518-1030-a1b2c3d4",
+          sessionStartedAt: "2026-05-18T02:30:00Z",
+          filenameHint: "derived.md",
+          generatedBy: "command-lead",
+          planId: "b1c2d3e4",
+          sourcePlanRef: source.path,
+          sourceSessionKey: "20260518-1130-z9y8x7w6",
+        },
+        { directory: process.cwd() },
+      ) as { ok: boolean; path: string; operation: string };
+
+      expect(derived.ok).toBe(true);
+      expect(derived.operation).toBe("create");
+      expect(derived.path).toBe("20260518-1030-a1b2c3d4/derived.md");
+    } finally {
+      if (previousConfigDir === undefined) {
+        delete process.env.OPENCODE_CONFIG_DIR;
+      } else {
+        process.env.OPENCODE_CONFIG_DIR = previousConfigDir;
+      }
+      await rm(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it("supports replacement create for bounded_lite_plan_artifact", async () => {
+    const configDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-planart-replacement-"));
+    const previousConfigDir = process.env.OPENCODE_CONFIG_DIR;
+
+    try {
+      process.env.OPENCODE_CONFIG_DIR = configDir;
+      const hooks = createBoundedLitePlugin({ directory: process.cwd() }, { configDir });
+
+      const oldPlan = await execPlanArtifact(
+        hooks,
+        {
+          action: "write",
+          operation: "create",
+          title: "Old",
+          markdown: "# Old",
+          sessionKey: "20260518-1130-z9y8x7w6",
+          sessionStartedAt: "2026-05-18T03:30:00Z",
+          filenameHint: "old.md",
+          generatedBy: "command-lead",
+          planId: "a1b2c3d4",
+        },
+        { directory: process.cwd() },
+      ) as { path: string };
+
+      const created = await execPlanArtifact(
+        hooks,
+        {
+          action: "write",
+          operation: "create",
+          title: "Replacement",
+          markdown: "# Replacement",
+          sessionKey: "20260518-1030-a1b2c3d4",
+          sessionStartedAt: "2026-05-18T02:30:00Z",
+          filenameHint: "replacement.md",
+          generatedBy: "command-lead",
+          planId: "b1c2d3e4",
+          replacesPlanRef: oldPlan.path,
+          replacesSessionKey: "20260518-1130-z9y8x7w6",
+        },
+        { directory: process.cwd() },
+      ) as { ok: boolean; path: string; operation: string };
+
+      expect(created.ok).toBe(true);
+      expect(created.operation).toBe("create");
+      expect(created.path).toBe("20260518-1030-a1b2c3d4/replacement.md");
+    } finally {
+      if (previousConfigDir === undefined) {
+        delete process.env.OPENCODE_CONFIG_DIR;
+      } else {
+        process.env.OPENCODE_CONFIG_DIR = previousConfigDir;
+      }
+      await rm(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects partial provenance create input for bounded_lite_plan_artifact", async () => {
+    const hooks = createBoundedLitePlugin({ directory: process.cwd() });
+
+    const output = await execPlanArtifact(
+      hooks,
+      {
+        action: "write",
+        operation: "create",
+        title: "Derived",
+        markdown: "# Derived",
+        sessionKey: "20260518-1030-a1b2c3d4",
+        sessionStartedAt: "2026-05-18T02:30:00Z",
+        filenameHint: "derived.md",
+        generatedBy: "command-lead",
+        planId: "b1c2d3e4",
+        sourceSessionKey: "20260518-1130-z9y8x7w6",
+      },
+      { directory: process.cwd() },
+    ) as { ok: boolean; code: string; message: string };
+
+    expect(output.ok).toBe(false);
+    expect(output.code).toBe("PLANART_ERR_SOURCE_PLAN_REF_REQUIRED");
+  });
+
+  it("rejects missing update payload and cross-session target for bounded_lite_plan_artifact", async () => {
+    const hooks = createBoundedLitePlugin({ directory: process.cwd() });
+
+    const missingPayload = await execPlanArtifact(
+      hooks,
+      {
+        action: "write",
+        operation: "update",
+        sessionKey: "20260518-1030-a1b2c3d4",
+        sessionStartedAt: "2026-05-18T02:30:00Z",
+        generatedBy: "command-lead",
+      },
+      { directory: process.cwd() },
+    ) as { ok: boolean; code: string; message: string };
+
+    const crossSession = await execPlanArtifact(
+      hooks,
+      {
+        action: "write",
+        operation: "update",
+        targetPlanRef: "20260518-1130-z9y8x7w6/plan.md",
+        markdown: "# x",
+        sessionKey: "20260518-1030-a1b2c3d4",
+        sessionStartedAt: "2026-05-18T02:30:00Z",
+        generatedBy: "command-lead",
+      },
+      { directory: process.cwd() },
+    ) as { ok: boolean; code: string; message: string };
+
+    const updateWithSource = await execPlanArtifact(
+      hooks,
+      {
+        action: "write",
+        operation: "update",
+        markdown: "# x",
+        sourcePlanRef: "20260518-1130-z9y8x7w6/plan.md",
+        sessionKey: "20260518-1030-a1b2c3d4",
+        sessionStartedAt: "2026-05-18T02:30:00Z",
+        generatedBy: "command-lead",
+      },
+      { directory: process.cwd() },
+    ) as { ok: boolean; code: string; message: string };
+
+    const updateWithReplacement = await execPlanArtifact(
+      hooks,
+      {
+        action: "write",
+        operation: "update",
+        markdown: "# x",
+        replacesPlanRef: "20260518-1130-z9y8x7w6/plan.md",
+        sessionKey: "20260518-1030-a1b2c3d4",
+        sessionStartedAt: "2026-05-18T02:30:00Z",
+        generatedBy: "command-lead",
+      },
+      { directory: process.cwd() },
+    ) as { ok: boolean; code: string; message: string };
+
+    expect(missingPayload.ok).toBe(false);
+    expect(missingPayload.code).toBe("PLANART_ERR_MISSING_UPDATE_PAYLOAD");
+    expect(crossSession.ok).toBe(false);
+    expect(crossSession.code).toBe("PLANART_ERR_CROSS_SESSION_UPDATE");
+    expect(updateWithSource.ok).toBe(false);
+    expect(updateWithSource.code).toBe("PLANART_ERR_UPDATE_SOURCE_FORBIDDEN");
+    expect(updateWithReplacement.ok).toBe(false);
+    expect(updateWithReplacement.code).toBe("PLANART_ERR_UPDATE_REPLACEMENT_FORBIDDEN");
+  });
+
+  it("supports action=rebuild for bounded_lite_plan_artifact", async () => {
+    const configDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-planart-rebuild-"));
+    const previousConfigDir = process.env.OPENCODE_CONFIG_DIR;
+
+    try {
+      process.env.OPENCODE_CONFIG_DIR = configDir;
+      const hooks = createBoundedLitePlugin({ directory: process.cwd() }, { configDir });
+
+      await execPlanArtifact(
+        hooks,
+        {
+          action: "write",
+          operation: "create",
+          title: "路由方案设计",
+          markdown: "# Plan",
+          sessionKey: "20260518-1030-a1b2c3d4",
+          sessionStartedAt: "2026-05-18T02:30:00Z",
+          filenameHint: "routing-plan.md",
+          generatedBy: "command-lead",
+          planId: "a1b2c3d4",
+        },
+        { directory: process.cwd() },
+      );
+
+      await writeFile(path.join(configDir, "openplan", "index.jsonl"), "{broken\n");
+      const rebuilt = await execPlanArtifact(
+        hooks,
+        { action: "rebuild", reason: "manual repair" },
+        { directory: process.cwd() },
+      ) as {
+        ok: boolean;
+        action: string;
+        applied: boolean;
+        indexPath: string;
+        scannedFileCount: number;
+        rebuiltRecordCount: number;
+        status: string;
+        mode: string;
+      };
+
+      expect(rebuilt.ok).toBe(true);
+      expect(rebuilt.action).toBe("rebuild");
+      expect(rebuilt.indexPath).toBe("openplan/index.jsonl");
+      expect(rebuilt.scannedFileCount).toBe(1);
+      expect(rebuilt.rebuiltRecordCount).toBe(1);
+      expect(rebuilt.mode).toBe("manual-rebuild");
+    } finally {
+      if (previousConfigDir === undefined) {
+        delete process.env.OPENCODE_CONFIG_DIR;
+      } else {
+        process.env.OPENCODE_CONFIG_DIR = previousConfigDir;
+      }
+      await rm(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects write-only fields for action=rebuild", async () => {
+    const hooks = createBoundedLitePlugin({ directory: process.cwd() });
+
+    const cases: Array<{ payload: Record<string, unknown>; code: string }> = [
+      { payload: { action: "rebuild", filenameHint: "a.md" }, code: "PLANART_ERR_REBUILD_WRITE_FIELDS_FORBIDDEN" },
+      { payload: { action: "rebuild", filenameHint: "" }, code: "PLANART_ERR_REBUILD_WRITE_FIELDS_FORBIDDEN" },
+      { payload: { action: "rebuild", planId: "a1b2c3d4" }, code: "PLANART_ERR_REBUILD_WRITE_FIELDS_FORBIDDEN" },
+      { payload: { action: "rebuild", planId: null }, code: "PLANART_ERR_REBUILD_WRITE_FIELDS_FORBIDDEN" },
+      { payload: { action: "rebuild", status: "draft" }, code: "PLANART_ERR_REBUILD_WRITE_FIELDS_FORBIDDEN" },
+      { payload: { action: "rebuild", status: 0 }, code: "PLANART_ERR_REBUILD_WRITE_FIELDS_FORBIDDEN" },
+      { payload: { action: "rebuild", maturityLevel: "M2" }, code: "PLANART_ERR_REBUILD_WRITE_FIELDS_FORBIDDEN" },
+      { payload: { action: "rebuild", maturityLevel: false }, code: "PLANART_ERR_REBUILD_WRITE_FIELDS_FORBIDDEN" },
+      { payload: { action: "rebuild", filename_hint: {} }, code: "PLANART_ERR_REBUILD_WRITE_FIELDS_FORBIDDEN" },
+      { payload: { action: "rebuild", plan_id: [] }, code: "PLANART_ERR_REBUILD_WRITE_FIELDS_FORBIDDEN" },
+    ];
+
+    for (const testCase of cases) {
+      const output = await execPlanArtifact(
+        hooks,
+        testCase.payload,
+        { directory: process.cwd() },
+      ) as { ok: boolean; code: string; message: string };
+
+      expect(output.ok).toBe(false);
+      expect(output.code).toBe(testCase.code);
+    }
+  });
+
+  it("self-check 恢复缺失 index 后首次 write 正常", async () => {
+    const configDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-planart-selfcheck-missing-"));
+    const previousConfigDir = process.env.OPENCODE_CONFIG_DIR;
+
+    try {
+      process.env.OPENCODE_CONFIG_DIR = configDir;
+      await writePlanArtifact({
+        projectRoot: process.cwd(),
+        configDir,
+        action: "write",
+        operation: "create",
+        title: "seed",
+        markdown: "# seed",
+        sessionKey: "20260518-1030-a1b2c3d4",
+        sessionStartedAt: "2026-05-18T02:30:00Z",
+        filenameHint: "seed.md",
+        generatedBy: "command-lead",
+        planId: "a1b2c3d4",
+      });
+      await rm(path.join(configDir, "openplan", "index.jsonl"), { force: true });
+
+      const hooks = createBoundedLitePlugin({ directory: process.cwd() }, { configDir });
+
+      const output = await execPlanArtifact(
+        hooks,
+        {
+          action: "write",
+          operation: "create",
+          title: "next",
+          markdown: "# next",
+          sessionKey: "20260518-1030-a1b2c3d4",
+          sessionStartedAt: "2026-05-18T02:30:00Z",
+          filenameHint: "next.md",
+          generatedBy: "command-lead",
+          planId: "b1c2d3e4",
+        },
+        { directory: process.cwd() },
+      ) as { ok: boolean; action: string; applied: boolean };
+
+      expect(output.ok).toBe(true);
+      const index = await readFile(path.join(configDir, "openplan", "index.jsonl"), "utf8");
+      expect(index).toContain('"path":"20260518-1030-a1b2c3d4/seed.md"');
+      expect(index).toContain('"path":"20260518-1030-a1b2c3d4/next.md"');
+    } finally {
+      if (previousConfigDir === undefined) {
+        delete process.env.OPENCODE_CONFIG_DIR;
+      } else {
+        process.env.OPENCODE_CONFIG_DIR = previousConfigDir;
+      }
+      await rm(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it("self-check 只执行一次，后续 index 损坏由 write-recovery 而非再次 self-check 处理", async () => {
+    const configDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-planart-selfcheck-once-"));
+    const previousConfigDir = process.env.OPENCODE_CONFIG_DIR;
+
+    try {
+      process.env.OPENCODE_CONFIG_DIR = configDir;
+      const hooks = createBoundedLitePlugin({ directory: process.cwd() }, { configDir });
+
+      const first = await execPlanArtifact(
+        hooks,
+        {
+          action: "write",
+          operation: "create",
+          title: "seed",
+          markdown: "# seed",
+          sessionKey: "20260518-1030-a1b2c3d4",
+          sessionStartedAt: "2026-05-18T02:30:00Z",
+          filenameHint: "seed.md",
+          generatedBy: "command-lead",
+          planId: "a1b2c3d4",
+        },
+        { directory: process.cwd() },
+      ) as { ok: boolean };
+
+      expect(first.ok).toBe(true);
+      await writeFile(path.join(configDir, "openplan", "index.jsonl"), "{broken\n");
+
+      const second = await execPlanArtifact(
+        hooks,
+        {
+          action: "write",
+          operation: "create",
+          title: "after",
+          markdown: "# after",
+          sessionKey: "20260518-1030-a1b2c3d4",
+          sessionStartedAt: "2026-05-18T02:30:00Z",
+          filenameHint: "after.md",
+          generatedBy: "command-lead",
+          planId: "b1c2d3e4",
+        },
+        { directory: process.cwd() },
+      ) as { ok: boolean; applied: boolean; rebuildTriggered: boolean };
+
+      expect(second.ok).toBe(true);
+      expect(second.applied).toBe(true);
+      expect(second.rebuildTriggered).toBe(true);
+    } finally {
+      if (previousConfigDir === undefined) {
+        delete process.env.OPENCODE_CONFIG_DIR;
+      } else {
+        process.env.OPENCODE_CONFIG_DIR = previousConfigDir;
+      }
+      await rm(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it("self-check 损坏 index 时首次调用自动恢复", async () => {
+    const configDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-planart-selfcheck-corrupt-"));
+    const previousConfigDir = process.env.OPENCODE_CONFIG_DIR;
+
+    try {
+      process.env.OPENCODE_CONFIG_DIR = configDir;
+      await writePlanArtifact({
+        projectRoot: process.cwd(),
+        configDir,
+        action: "write",
+        operation: "create",
+        title: "seed",
+        markdown: "# seed",
+        sessionKey: "20260518-1030-a1b2c3d4",
+        sessionStartedAt: "2026-05-18T02:30:00Z",
+        filenameHint: "seed.md",
+        generatedBy: "command-lead",
+        planId: "a1b2c3d4",
+      });
+      await writeFile(path.join(configDir, "openplan", "index.jsonl"), "{broken\n");
+
+      const hooks = createBoundedLitePlugin({ directory: process.cwd() }, { configDir });
+      const output = await execPlanArtifact(
+        hooks,
+        {
+          action: "write",
+          operation: "create",
+          title: "next",
+          markdown: "# next",
+          sessionKey: "20260518-1030-a1b2c3d4",
+          sessionStartedAt: "2026-05-18T02:30:00Z",
+          filenameHint: "next.md",
+          generatedBy: "command-lead",
+          planId: "b1c2d3e4",
+        },
+        { directory: process.cwd() },
+      ) as { ok: boolean };
+
+      expect(output.ok).toBe(true);
+      await expect(readFile(path.join(configDir, "openplan", "index.jsonl"), "utf8")).resolves.toContain('"path":"20260518-1030-a1b2c3d4/next.md"');
+    } finally {
+      if (previousConfigDir === undefined) {
+        delete process.env.OPENCODE_CONFIG_DIR;
+      } else {
+        process.env.OPENCODE_CONFIG_DIR = previousConfigDir;
+      }
+      await rm(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it("self-check 失败后后续 write 能看到失败状态，manual rebuild 可继续暴露修复结果", async () => {
+    const configDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-planart-selfcheck-failed-"));
+    const previousConfigDir = process.env.OPENCODE_CONFIG_DIR;
+
+    try {
+      process.env.OPENCODE_CONFIG_DIR = configDir;
+      await mkdir(path.join(configDir, "openplan", "20260518-1030-a1b2c3d4"), { recursive: true });
+      await writeFile(path.join(configDir, "openplan", "20260518-1030-a1b2c3d4", "bad.md"), "---\nplan_id: broken\n---\nbody\n");
+      const hooks = createBoundedLitePlugin({ directory: process.cwd() }, { configDir });
+
+      const writeAttempt = await execPlanArtifact(
+        hooks,
+        {
+          action: "write",
+          operation: "create",
+          title: "after",
+          markdown: "# after",
+          sessionKey: "20260518-1030-a1b2c3d4",
+          sessionStartedAt: "2026-05-18T02:30:00Z",
+          filenameHint: "after.md",
+          generatedBy: "command-lead",
+          planId: "b1c2d3e4",
+        },
+        { directory: process.cwd() },
+      ) as { ok: boolean; code: string; message: string };
+
+      const rebuildAttempt = await execPlanArtifact(
+        hooks,
+        { action: "rebuild", reason: "manual repair" },
+        { directory: process.cwd() },
+      ) as { ok: boolean; code: string; message: string };
+
+      expect(writeAttempt.ok).toBe(false);
+      expect(writeAttempt.message).toContain("index self-check repair failed");
+      expect(rebuildAttempt.ok).toBe(false);
+      expect(rebuildAttempt.message).toContain("invalid plan file");
+    } finally {
+      if (previousConfigDir === undefined) {
+        delete process.env.OPENCODE_CONFIG_DIR;
+      } else {
+        process.env.OPENCODE_CONFIG_DIR = previousConfigDir;
+      }
+      await rm(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it("self-check 失败后即使修好文件，第二次调用也不会自动重试 self-check", async () => {
+    const configDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-planart-selfcheck-once-fail-"));
+    const previousConfigDir = process.env.OPENCODE_CONFIG_DIR;
+
+    try {
+      process.env.OPENCODE_CONFIG_DIR = configDir;
+      await mkdir(path.join(configDir, "openplan", "20260518-1030-a1b2c3d4"), { recursive: true });
+      const badPlanPath = path.join(configDir, "openplan", "20260518-1030-a1b2c3d4", "bad.md");
+      await writeFile(badPlanPath, "---\nplan_id: broken\n---\nbody\n");
+      const hooks = createBoundedLitePlugin({ directory: process.cwd() }, { configDir });
+
+      const first = await execPlanArtifact(
+        hooks,
+        {
+          action: "write",
+          operation: "create",
+          title: "after",
+          markdown: "# after",
+          sessionKey: "20260518-1030-a1b2c3d4",
+          sessionStartedAt: "2026-05-18T02:30:00Z",
+          filenameHint: "after.md",
+          generatedBy: "command-lead",
+          planId: "b1c2d3e4",
+        },
+        { directory: process.cwd() },
+      ) as { ok: boolean; message: string };
+
+      expect(first.ok).toBe(false);
+      await writePlanArtifact({
+        projectRoot: process.cwd(),
+        configDir,
+        action: "write",
+        operation: "create",
+        title: "fixed",
+        markdown: "# fixed",
+        sessionKey: "20260518-1030-a1b2c3d4",
+        sessionStartedAt: "2026-05-18T02:30:00Z",
+        filenameHint: "fixed.md",
+        generatedBy: "command-lead",
+        planId: "c1d2e3f4",
+      }).catch(() => undefined);
+      await rm(badPlanPath, { force: true });
+
+      const second = await execPlanArtifact(
+        hooks,
+        {
+          action: "write",
+          operation: "create",
+          title: "after-2",
+          markdown: "# after-2",
+          sessionKey: "20260518-1030-a1b2c3d4",
+          sessionStartedAt: "2026-05-18T02:30:00Z",
+          filenameHint: "after-2.md",
+          generatedBy: "command-lead",
+          planId: "d1e2f3a4",
+        },
+        { directory: process.cwd() },
+      ) as { ok: boolean; message: string };
+
+      expect(second.ok).toBe(false);
+      expect(second.message).toContain("index self-check repair failed");
+    } finally {
+      if (previousConfigDir === undefined) {
+        delete process.env.OPENCODE_CONFIG_DIR;
+      } else {
+        process.env.OPENCODE_CONFIG_DIR = previousConfigDir;
+      }
+      await rm(configDir, { recursive: true, force: true });
+    }
   });
 
   it("returns unknown action validation error for invalid action", async () => {

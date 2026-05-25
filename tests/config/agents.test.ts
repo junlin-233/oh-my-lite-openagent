@@ -193,12 +193,12 @@ describe("OpenCode agent topology", () => {
     expect(promptText).toContain("escalate with the blockers");
   });
 
-  it("requires Command Lead to persist plan artifacts under .liteagent", () => {
+  it("requires Command Lead to persist plan artifacts under openplan", () => {
     const promptText = readPrompt("command-lead");
 
     expect(promptText).toContain("## Plan Artifact Persistence");
-    expect(promptText).toContain(".liteagent/plans/");
-    expect(promptText).toContain(".liteagent/plan-index.jsonl");
+    expect(promptText).toContain("<OPENCODE_CONFIG_DIR>/openplan/<session_key>/");
+    expect(promptText).toContain("openplan/index.jsonl");
     expect(promptText).toContain("bounded_lite_plan_artifact");
     expect(promptText).toContain("Do not write plan artifacts under `.opencode/`");
   });
@@ -222,15 +222,13 @@ describe("OpenCode agent topology", () => {
     expect(promptText).toContain("current-state conflicts");
     expect(promptText).toContain("target-state gaps");
     expect(promptText).toContain("never `reviewed` or `M3`");
-    expect(promptText).toContain("recommended_plan_path");
-    expect(promptText).toContain(".liteagent/plans/");
+    expect(promptText).toContain("filenameHint");
   });
 
-  it("requires Deep Plan Builder to return a .liteagent plan path without owning persistence", () => {
+  it("requires Deep Plan Builder to return a filenameHint without owning persistence", () => {
     const promptText = readPrompt("deep-plan-builder");
 
-    expect(promptText).toContain("recommended_plan_path");
-    expect(promptText).toContain(".liteagent/plans/");
+    expect(promptText).toContain("filenameHint");
     expect(promptText).toContain("Command Lead owns actual file persistence");
   });
 

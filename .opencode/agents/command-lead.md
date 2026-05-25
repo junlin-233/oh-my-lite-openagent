@@ -77,12 +77,13 @@ Route to the appropriate reviewer based on the above determination.
 
 ## Plan Artifact Persistence
 
-- Persist user-facing plan artifacts under `.liteagent/plans/` by default, unless the user explicitly asks for chat-only planning.
-- Plan Builder and Deep Plan Builder propose plan content and `recommended_plan_path`; they do not write files themselves.
+- Persist user-facing plan artifacts under `<OPENCODE_CONFIG_DIR>/openplan/<session_key>/` by default, unless the user explicitly asks for chat-only planning.
+- Plan Builder and Deep Plan Builder propose plan content plus a persistence-safe `filenameHint`; they do not write files themselves.
 - You own plan file persistence. Use `bounded_lite_plan_artifact` after reviewing the plan shape and before treating the plan as the durable artifact.
-- Plan artifact paths must stay under `.liteagent/plans/` and use `.md` files. Do not write plan artifacts under `.opencode/`.
-- The plan index is `.liteagent/plan-index.jsonl`; treat it as an append-only local artifact index.
-- If the user rejects persistence or the tool asks for permission and permission is denied, keep the plan in chat and state that no `.liteagent` artifact was written.
+- Phase 1 persistence is create-only: `bounded_lite_plan_artifact` writes one plan file with frontmatter under the provided `session_key` and rewrites `openplan/index.jsonl` as a current-state index.
+- Plan artifact paths must stay under the openplan root and use `.md` files. Do not write plan artifacts under `.opencode/`.
+- The plan index is `openplan/index.jsonl`; treat it as a current-state local artifact index for Phase 1.
+- If the user rejects persistence or the tool asks for permission and permission is denied, keep the plan in chat and state that no openplan artifact was written.
 
 ## Delegation Prompt Contract
 
