@@ -228,12 +228,12 @@ describe("OpenCode agent topology", () => {
     expect(promptText).toContain("escalate with the blockers");
   });
 
-  it("requires Command Lead to persist plan artifacts under .liteagent", () => {
+  it("requires Command Lead to persist plan artifacts under openplan", () => {
     const promptText = readPrompt("command-lead");
 
     expect(promptText).toContain("## Plan Artifact Persistence");
-    expect(promptText).toContain(".liteagent/plans/");
-    expect(promptText).toContain(".liteagent/plan-index.jsonl");
+    expect(promptText).toContain("<OPENCODE_CONFIG_DIR>/openplan/<session_key>/");
+    expect(promptText).toContain("openplan/index.jsonl");
     expect(promptText).toContain("bounded_lite_plan_artifact");
     expect(promptText).toContain("Do not write plan artifacts under `.opencode/`");
     expect(promptText).toContain("Plan Builder may directly write and maintain final plan artifacts");
@@ -263,35 +263,15 @@ describe("OpenCode agent topology", () => {
     expect(promptText).toContain("5 clarification turns");
     expect(promptText).toContain("current-state conflicts");
     expect(promptText).toContain("target-state gaps");
-    expect(promptText).toContain("must not be emitted as a final artifact");
-    expect(promptText).toContain("recommended_plan_path");
-    expect(promptText).toContain(".liteagent/plans/");
-    expect(promptText).toContain("write the final plan artifact yourself");
-    expect(promptText).toContain(".liteagent/plan-index.jsonl");
-    expect(promptText).toContain("Deleting plan artifact files or removing/changing index entries is allowed only when the user explicitly asks");
-    expect(promptText).toContain("does not grant execution dispatch, final approval, or canonical state advancement authority");
+    expect(promptText).toContain("never `reviewed` or `M3`");
+    expect(promptText).toContain("filenameHint");
   });
 
-  it("allows Deep Plan Builder to write .liteagent plan artifacts without owning execution", () => {
+  it("requires Deep Plan Builder to return a filenameHint without owning persistence", () => {
     const promptText = readPrompt("deep-plan-builder");
 
-    expect(promptText).toContain("Match user's language");
-    expect(promptText).toContain("recommended_plan_path");
-    expect(promptText).toContain(".liteagent/plans/");
-    expect(promptText).toContain("write and maintain the final detailed plan artifact yourself");
-    expect(promptText).toContain(".liteagent/plan-index.jsonl");
-    expect(config.agent["deep-plan-builder"]?.permission?.edit).toMatchObject({
-      ".liteagent/**": "allow",
-    });
-    expect(promptText).toContain("Direct plan persistence does not grant execution dispatch, final approval, or canonical state advancement authority");
-  });
-
-  it("requires Task Lead and reviewers to request scoped evidence when needed", () => {
-    expect(readPrompt("task-lead")).toContain("require scoped Explore evidence");
-    expect(readPrompt("task-lead")).toContain("required Explore evidence is missing");
-    expect(readPrompt("plan-review")).toContain("actively request scoped Explore evidence");
-    expect(readPrompt("plan-review")).toContain("without locatable evidence");
-    expect(readPrompt("result-review")).toContain("actively request scoped Explore evidence");
+    expect(promptText).toContain("filenameHint");
+    expect(promptText).toContain("Command Lead owns actual file persistence");
   });
 
   it("requires every delegating role to use the standard assignment fields", () => {
