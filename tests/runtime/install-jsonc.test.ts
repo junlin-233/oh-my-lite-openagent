@@ -63,6 +63,86 @@ describe("global installer JSONC config handling", () => {
       expect(liteConfig.schemaVersion).toBe(1);
       expect(generatedCommandLead).toContain("mode: primary");
       expect(await pathExists(`${jsoncPath}.bak`)).toBe(true);
+      expect(await pathExists(path.join(configDir, "oh-my-lite-openagent.json.bak"))).toBe(false);
+      expect(await pathExists(path.join(configDir, "agents", "command-lead.md.bak"))).toBe(false);
+    } finally {
+      await rm(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it("creates backups only for files that already exist", async () => {
+    const configDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-backup-existing-"));
+
+    try {
+      const jsonPath = path.join(configDir, "opencode.json");
+      const agentPath = path.join(configDir, "agents", "command-lead.md");
+      await writeFile(jsonPath, `{ "provider": { "openai": {} } }\n`);
+      await writeFile(agentPath, "---\nmode: primary\n---\nold\n", { flag: "wx" }).catch(async (error) => {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        await import("node:fs/promises").then(({ mkdir }) => mkdir(path.dirname(agentPath), { recursive: true }));
+        await writeFile(agentPath, "---\nmode: primary\n---\nold\n");
+      });
+
+      await runInstaller(configDir);
+
+      expect(await pathExists(`${jsonPath}.bak`)).toBe(true);
+      expect(await readFile(`${agentPath}.bak`, "utf8")).toContain("old");
+      expect(await pathExists(path.join(configDir, "oh-my-lite-openagent.json.bak"))).toBe(false);
+    } finally {
+      await rm(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it("removes stale managed agents from existing opencode.json", async () => {
+    const configDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-agent-cleanup-"));
+
+    try {
+      const jsonPath = path.join(configDir, "opencode.json");
+      await writeFile(
+        jsonPath,
+        `${JSON.stringify({
+          agent: {
+            "command-lead": { mode: "primary", permission: { bash: { "*": "allow" } } },
+            "custom-agent": { model: "openai/gpt-5.4" },
+          },
+        })}\n`,
+      );
+
+      await runInstaller(configDir);
+      const writtenConfig = JSON.parse(await readFile(jsonPath, "utf8"));
+
+      expect(writtenConfig.agent).toEqual({
+        "custom-agent": { model: "openai/gpt-5.4" },
+      });
+    } finally {
+      await rm(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves existing permissions while backfilling the managed bash policy", async () => {
+    const configDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-permission-bash-"));
+
+    try {
+      const jsonPath = path.join(configDir, "opencode.json");
+      await writeFile(
+        jsonPath,
+        `${JSON.stringify({
+          permission: {
+            edit: { "*": "allow", "**/custom-secret": "ask" },
+          },
+        })}\n`,
+      );
+
+      await runInstaller(configDir);
+      const writtenConfig = JSON.parse(await readFile(jsonPath, "utf8"));
+
+      expect(writtenConfig.permission.edit).toEqual({ "*": "allow", "**/custom-secret": "ask" });
+      expect(writtenConfig.permission.bash).toBeTruthy();
+      expect(writtenConfig.permission.bash["*"]).toBe("allow");
+      expect(writtenConfig.permission.bash["sudo *"]).toBe("ask");
+      expect(Object.keys(writtenConfig.permission.bash).indexOf("*")).toBeLessThan(
+        Object.keys(writtenConfig.permission.bash).indexOf("sudo *"),
+      );
     } finally {
       await rm(configDir, { recursive: true, force: true });
     }

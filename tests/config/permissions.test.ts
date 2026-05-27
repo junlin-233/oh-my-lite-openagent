@@ -186,12 +186,10 @@ describe("delegation boundaries", () => {
     expect(edit["**/composer.lock"]).toBe("deny");
   });
 
-  it("uses the permissive bash policy for every real role", () => {
+  it("lets every real role inherit the global permissive bash policy", () => {
     const globalBash = config.permission?.bash;
     expect(typeof globalBash).toBe("object");
     if (typeof globalBash !== "object" || globalBash === null) return;
-
-    expect(config.agent["command-lead"]?.permission?.bash).toEqual(globalBash);
 
     for (const agentName of [
       "command-lead",
@@ -203,7 +201,9 @@ describe("delegation boundaries", () => {
       "plan-review",
       "result-review",
     ]) {
-      const agentBash = config.agent[agentName]?.permission?.bash ?? globalBash;
+      expect(config.agent[agentName]?.permission?.bash, agentName).toBeUndefined();
+
+      const agentBash = globalBash;
       expect(typeof agentBash).toBe("object");
       if (typeof agentBash !== "object" || agentBash === null) continue;
 

@@ -104,9 +104,11 @@ agents/*.md
 oh-my-lite-openagent.json
 ```
 
-然后只将 `scripts/managed-config.mjs` 中的插件/命令启动片段合并到 OpenCode 全局配置中。角色定义会生成到 OpenCode 原生 markdown agent 文件 `<configDir>/agents/*.md`；角色模型和推理强度配置写入 `<configDir>/oh-my-lite-openagent.json`。包内不再携带根目录 `opencode.json`；provider、API key、无关插件和自定义 agent 都属于用户自己的 OpenCode 配置。如果目标配置目录里只有 `opencode.jsonc`，安装器会读写 `opencode.jsonc`，不会额外创建 `opencode.json`；如果 `opencode.json` 和 `opencode.jsonc` 同时存在，则以 `opencode.json` 作为活动合并目标。
+然后只将 `scripts/managed-config.mjs` 中的插件/命令启动片段合并到 OpenCode 全局配置中。角色定义会生成到 OpenCode 原生 markdown agent 文件 `<configDir>/agents/*.md`；角色模型和推理强度配置写入 `<configDir>/oh-my-lite-openagent.json`。安装器会从 `opencode.json` 中移除旧的托管角色定义，避免全局配置和 markdown agent 文件出现两份托管角色；用户自定义 agent 会保留。包内不再携带根目录 `opencode.json`；provider、API key、无关插件和自定义 agent 都属于用户自己的 OpenCode 配置。如果目标配置目录里只有 `opencode.jsonc`，安装器会读写 `opencode.jsonc`，不会额外创建 `opencode.json`；如果 `opencode.json` 和 `opencode.jsonc` 同时存在，则以 `opencode.json` 作为活动合并目标。
 
-托管的命令行权限对 8 个真实角色默认较宽松：bash 默认 `allow`，只有危险或敏感命令会 `ask`，例如破坏性文件操作、系统提权/权限命令、会修改 git 历史或远端的命令、npm 发布/移除/改版本、真实写入 OpenCode 全局配置的安装器命令，以及下载后直接执行的管道/eval 形式。被禁用覆盖的 OpenCode 内置 `build` 和 `plan` 仍保持全拒绝。
+安装器只会为已经存在的目标文件写 `.bak` 备份，例如已有的 `opencode.json`/`opencode.jsonc` 或已有的 `<configDir>/agents/*.md`；首次创建的新文件不会额外生成空备份。
+
+托管的命令行权限对 8 个真实角色默认较宽松：bash 默认 `allow`，只有危险或敏感命令会 `ask`，例如破坏性文件操作、系统提权/权限命令、会修改 git 历史或远端的命令、npm 发布/移除/改版本、真实写入 OpenCode 全局配置的安装器命令，以及下载后直接执行的管道/eval 形式。该 bash 策略写在全局 `permission.bash`；如果用户已有自己的 `permission` 但缺少 `bash`，安装器会补齐托管的 bash 策略，同时保留用户已有的其他 permission 配置。如果用户已经显式配置了 `permission.bash`，安装器会保留用户配置。被禁用覆盖的 OpenCode 内置 `build` 和 `plan` 仍保持全拒绝。
 
 默认配置目录：
 

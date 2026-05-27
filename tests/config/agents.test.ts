@@ -173,10 +173,10 @@ describe("OpenCode agent topology", () => {
     expect(promptText).not.toContain("OMO_INTERNAL_INITIATOR");
   });
 
-  it("keeps Command Lead routing thresholds explicit", () => {
+  it("keeps Command Lead routing decision tree explicit", () => {
     const promptText = readPrompt("command-lead");
 
-    expect(promptText).toContain("## Routing Thresholds");
+    expect(promptText).toContain("## Routing Decision Tree");
     expect(promptText).toContain("## Repository Evidence Gate");
     expect(promptText).toContain("Prefer the lightest successful path");
     expect(promptText).toContain("do not narrate obvious mechanics");
@@ -184,14 +184,15 @@ describe("OpenCode agent topology", () => {
     expect(promptText).toContain("gather scoped repository evidence");
     expect(promptText).toContain("Direct local inspection is acceptable for one or two small files");
     expect(promptText).toContain("narrow role-instruction wording edits");
-    expect(promptText).toContain("Execute directly when all of these are true");
+    expect(promptText).toContain("**Direct execution?**");
     expect(promptText).toContain("keep visible commentary minimal");
-    expect(promptText).toContain("Route to Plan Builder when any of these are true");
-    expect(promptText).toContain("Route to Deep Plan Builder when any of these are true");
-    expect(promptText).toContain("lower-strength model");
-    expect(promptText).toContain("detailed plan artifact");
-    expect(promptText).toContain("architecture invariants");
-    expect(promptText).toContain("Do not route to Deep Plan Builder merely for read-only architecture review");
+    expect(promptText).toContain("**Planning required?**");
+    expect(promptText).toContain("**Deep planning explicitly required?**");
+    expect(promptText).toContain("lower-strength-model handoff");
+    expect(promptText).toContain("detailed execution-grade plan");
+    expect(promptText).toContain("Do not choose Deep Plan Builder only because the work is complex");
+    expect(promptText).toContain("Use Plan Builder as the normal planning route");
+    expect(promptText).toContain("Plan Builder returns a blocking recommendation to escalate");
     expect(promptText).toContain("Do not route to planning only because a task has several mechanical steps");
     expect(promptText).not.toContain("medium or larger");
   });
@@ -208,7 +209,8 @@ describe("OpenCode agent topology", () => {
     expect(promptText).toContain("bounded_lite_plan_readiness");
     expect(promptText).toContain("no unresolved major Plan Review finding");
     expect(promptText).toContain("do not fill missing product, compatibility, architecture, or acceptance decisions yourself");
-    expect(promptText).toContain("route to Deep Plan Builder for a detailed plan");
+    expect(promptText).toContain("ask the user whether to escalate to Deep Plan Builder");
+    expect(promptText).toContain("Plan Builder already returned a blocking escalation recommendation");
     expect(promptText).toContain("escalate with the blockers");
   });
 
@@ -227,7 +229,8 @@ describe("OpenCode agent topology", () => {
   it("keeps Plan Builder aligned with the v2.1 plan spec", () => {
     const promptText = readPrompt("plan-builder");
 
-    expect(promptText).toContain("Match user's language");
+    expect(promptText).toContain("Match the user's language");
+    expect(promptText).toContain("Keep code identifiers, file paths, commands, and schema keys unchanged");
     expect(promptText).toContain("## Discussion Mode Output");
     expect(promptText).toContain("Ask at most 3 high-value blocking questions");
     expect(promptText).toContain("Do not emit full frontmatter");
@@ -254,12 +257,14 @@ describe("OpenCode agent topology", () => {
     expect(promptText).toContain(".liteagent/plan-index.jsonl");
     expect(promptText).toContain("Deleting plan artifact files or removing/changing index entries is allowed only when the user explicitly asks");
     expect(promptText).toContain("does not grant execution dispatch, final approval, or canonical state advancement authority");
+    expect(promptText).toContain("recommended_next_step: deep_plan_builder");
   });
 
   it("allows Deep Plan Builder to write .liteagent plan artifacts without owning execution", () => {
     const promptText = readPrompt("deep-plan-builder");
 
-    expect(promptText).toContain("Match user's language");
+    expect(promptText).toContain("Match the user's language");
+    expect(promptText).toContain("Keep code identifiers, file paths, commands, and schema keys unchanged");
     expect(promptText).toContain("recommended_plan_path");
     expect(promptText).toContain(".liteagent/plans/");
     expect(promptText).toContain("write and maintain the final detailed plan artifact yourself");
@@ -278,15 +283,8 @@ describe("OpenCode agent topology", () => {
     expect(readPrompt("result-review")).toContain("actively request scoped Explore evidence");
   });
 
-  it("requires every delegating role to use the standard assignment fields", () => {
-    const delegatingRoles = [
-      "command-lead",
-      "plan-builder",
-      "deep-plan-builder",
-      "task-lead",
-      "plan-review",
-      "result-review",
-    ];
+  it("keeps the full assignment contract centralized in Command Lead", () => {
+    const promptText = readPrompt("command-lead");
     const requiredFieldNames = [
       "TASK",
       "EXPECTED OUTCOME",
@@ -301,11 +299,28 @@ describe("OpenCode agent topology", () => {
       "FAILURE RETURN",
     ];
 
+    for (const field of requiredFieldNames) {
+      expect(promptText, field).toContain(field);
+    }
+  });
+
+  it("requires delegating roles to reference the Command Lead assignment contract", () => {
+    const delegatingRoles = [
+      "plan-builder",
+      "deep-plan-builder",
+      "task-lead",
+      "plan-review",
+      "result-review",
+    ];
+
     for (const roleName of delegatingRoles) {
       const promptText = readPrompt(roleName);
-      for (const field of requiredFieldNames) {
-        expect(promptText, `${roleName}:${field}`).toContain(field);
-      }
+      expect(promptText, roleName).toContain("Command Lead assignment contract");
+      expect(promptText, roleName).toContain("TASK");
+      expect(promptText, roleName).toContain("EXPECTED OUTCOME");
+      expect(promptText, roleName).toContain("ROLE");
+      expect(promptText, roleName).toContain("SCOPE");
+      expect(promptText, roleName).toContain("FAILURE RETURN");
     }
   });
 });

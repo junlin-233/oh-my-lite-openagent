@@ -69,14 +69,27 @@ const PERMISSIVE_BASH_PERMISSION = {
   "umount *": "ask"
 };
 
+const AGENT_MODELS_COMMAND_TEMPLATE = `Configure Oh My Lite OpenAgent role models.
+
+Workflow:
+1. Import the model pool; this includes every discovered provider, including OpenCode subscription providers such as opencode and opencode-go:
+   bounded_lite_model_config({ action: "import" })
+2. Preview recommendations only:
+   bounded_lite_model_config({ action: "auto" })
+   action=auto is recommendation-only and includes Task Lead profile recommendations.
+3. Show the pool and recommendations, ask whether they want changes, and only choose IDs returned by import/auto.
+4. Apply after approval with assignments and taskLeadProfileAssignments.
+
+Do not create new Task Lead agents; profiles are dispatch metadata for the single hidden task-lead agent.`;
+
 export const MANAGED_CONFIG = {
   "$schema": "https://opencode.ai/config.json",
   "default_agent": "command-lead",
   "command": {
     "agent-models": {
-      "description": "Import available OpenCode provider models, preview recommended per-role model/reasoning effort and Task Lead profile assignments, and apply them after user confirmation.",
+      "description": "Configure per-role models and Task Lead profile assignments with bounded_lite_model_config.",
       "agent": "command-lead",
-      "template": "Configure model assignments for Oh My Lite OpenAgent roles and Task Lead profiles.\n\n## Goal\n\nUse AI to recommend role models and Task Lead profile models from all available OpenCode model providers. The AI must not invent provider/model IDs.\n\nTask Lead profiles do not add new agents. They are selected from `plan.subtasks[].attributes` and provide dispatch metadata such as recommended model, fallback chain, and prompt guidance. Do not create new Task Lead agents. Current execution still uses the single hidden `task-lead` agent unless the runtime supports per-task model override.\n\n## Required Workflow\n\n1. Import the available model pool. By default this includes every discovered provider, including OpenCode subscription providers such as opencode and opencode-go. The current global model is context only and must not be used as a hard import filter.\n\n```\nbounded_lite_model_config({ action: \"import\" })\n```\n\n2. Ask the tool to show the usable imported model pool first, then generate recommended assignments. This is a preview only and must not write config.\n\n```\nbounded_lite_model_config({ action: \"auto\" })\n```\n\naction=auto is recommendation-only. It returns the available imported model pool before role recommendations and Task Lead profile recommendations, including `Recommended Task Lead profile assignments JSON`.\n\n3. Show the available model pool, then the recommended role assignments and Task Lead profile assignments to the user, and ask whether they want changes. If the user wants changes, revise only by choosing model IDs returned by action=import/auto.\n\n4. Apply only after the user accepts the recommendations or gives modifications.\n\n```\nbounded_lite_model_config({\n  action: \"apply\",\n  assignments: {\n    \"command-lead\": \"provider/model\",\n    \"explore\": \"provider/model\"\n  },\n  taskLeadProfileAssignments: {\n    \"code\": \"provider/model\",\n    \"quick\": \"provider/model\",\n    \"visual\": \"provider/model\"\n  }\n})\n```\n\nYou may omit `assignments` or `taskLeadProfileAssignments` when there is nothing to change in that group.\n\n## Actions\n\n- import: Load the eligible provider model pool.\n- list: Show current role models, Task Lead profile models, and available provider models.\n- auto: Preview recommended role assignments and Task Lead profile assignments.\n- apply: Write accepted role assignments and/or Task Lead profile assignments.\n\n## Role Selection Guidance\n\n| Role              | Need                  | Selection guidance |\n|-------------------|-----------------------|--------------------|\n| command-lead      | Strongest reasoning   | strongest imported reasoning model |\n| plan-builder      | Strong planning       | strongest imported structured planning model |\n| deep-plan-builder | Detailed handoff plan | strong imported planning model; mandatory review compensates handoff risk |\n| task-lead         | Bounded execution     | capable imported implementation model used as the default/fallback executor |\n| explore           | Fast retrieval        | fast/cheap imported mini, flash, or highspeed model |\n| librarian         | Fast research         | fast/cheap imported mini, flash, or highspeed model |\n| plan-review       | Critical review       | strongest imported review model |\n| result-review     | Critical review       | strongest imported review model |\n\n## Task Lead Profile Guidance\n\n| Profile    | Attributes                         | Selection guidance |\n|------------|------------------------------------|--------------------|\n| quick      | quick                              | fastest low-cost model |\n| code       | code                               | strong bounded implementation model |\n| research   | research, docs                     | fast research / documentation lookup model |\n| writing    | writing                            | clear prose and documentation model |\n| visual     | multimodal, visual                 | model with visual or strong UI reasoning capability |\n| deep       | deep, large-context                | stronger long-context reasoning model |\n| risk-high  | risk-high, security, migration     | strong critical-reasoning model |\n\n## AI selection rule\n\n- Only choose model IDs returned by action=import or the imported pool used by action=auto.\n- After action=auto, ask the user whether they want to modify role or Task Lead profile recommendations before calling action=apply.\n- Do not create new Task Lead agents for profiles; profiles configure dispatch metadata for the single hidden task-lead agent.\n\nIf no provider models are found, tell the user to configure or connect OpenCode providers first."
+      "template": AGENT_MODELS_COMMAND_TEMPLATE
     }
   },
   "permission": {
@@ -121,8 +134,7 @@ export const MANAGED_CONFIG = {
           "librarian": "allow",
           "plan-review": "allow",
           "result-review": "allow"
-        },
-        "bash": { ...PERMISSIVE_BASH_PERMISSION }
+        }
       }
     },
     "plan-builder": {
@@ -138,8 +150,7 @@ export const MANAGED_CONFIG = {
         },
         "edit": {
           "*": "allow"
-        },
-        "bash": { ...PERMISSIVE_BASH_PERMISSION }
+        }
       }
     },
     "deep-plan-builder": {
@@ -158,8 +169,7 @@ export const MANAGED_CONFIG = {
           "*": "deny",
           ".liteagent/**": "allow",
           "**/.liteagent/**": "allow"
-        },
-        "bash": { ...PERMISSIVE_BASH_PERMISSION }
+        }
       }
     },
     "build": {
@@ -209,8 +219,7 @@ export const MANAGED_CONFIG = {
         },
         "edit": {
           "*": "allow"
-        },
-        "bash": { ...PERMISSIVE_BASH_PERMISSION }
+        }
       }
     },
     "explore": {
@@ -225,7 +234,6 @@ export const MANAGED_CONFIG = {
         "edit": {
           "*": "deny"
         },
-        "bash": { ...PERMISSIVE_BASH_PERMISSION },
         "webfetch": "deny",
         "websearch": "deny"
       }
@@ -242,7 +250,6 @@ export const MANAGED_CONFIG = {
         "edit": {
           "*": "deny"
         },
-        "bash": { ...PERMISSIVE_BASH_PERMISSION },
         "webfetch": "allow",
         "websearch": "allow"
       }
@@ -259,8 +266,7 @@ export const MANAGED_CONFIG = {
         },
         "edit": {
           "*": "deny"
-        },
-        "bash": { ...PERMISSIVE_BASH_PERMISSION }
+        }
       }
     },
     "result-review": {
@@ -275,8 +281,7 @@ export const MANAGED_CONFIG = {
         },
         "edit": {
           "*": "deny"
-        },
-        "bash": { ...PERMISSIVE_BASH_PERMISSION }
+        }
       }
     }
   }
