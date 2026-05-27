@@ -38,7 +38,7 @@ The AI installation guide lives in [`AI-INSTALL.md`](./AI-INSTALL.md).
 
 ### Install
 
-Install from npm after the package is published:
+Install from npm :
 
 ```bash
 npm install -g oh-my-lite-openagent
@@ -133,46 +133,6 @@ Interactive model configuration:
 oh-my-lite-openagent --interactive
 ```
 
-## npm Package Publishing
-
-The package exposes two CLI names: `oh-my-lite-openagent` and `omlo-install`.
-
-Before publishing, run:
-
-```bash
-npm install
-npm test
-npm run typecheck
-npm run pack:dry-run
-```
-
-Publishing dry run:
-
-```bash
-npm run publish:dry-run
-```
-
-Publish after confirmation:
-
-```bash
-npm publish
-```
-
-If npm asks for a one-time password (OTP), open the authenticator app connected to your npm account and enter the corresponding 6-digit code. You can also pass it directly:
-
-```bash
-npm publish --otp 123456
-```
-
-If you do not want to enter OTP interactively, create a granular access token with publish permissions and bypass/automation support, then publish with that token:
-
-```bash
-npm config set //registry.npmjs.org/:_authToken=YOUR_NPM_TOKEN
-npm publish
-npm config delete //registry.npmjs.org/:_authToken
-```
-
-Before a real publish, `prepublishOnly` automatically runs tests, typecheck, and package dry run.
 
 ## Role and Task Lead Profile Model Configuration
 
