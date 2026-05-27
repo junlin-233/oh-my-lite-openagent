@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { copyFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { defaultConfigDir } from "./install-paths.mjs";
 import { MANAGED_CONFIG } from "./managed-config.mjs";
 
 const PLUGIN_FILE = "bounded-lite.ts";
@@ -480,19 +480,7 @@ function parseArgs(argv) {
   return args;
 }
 
-export function defaultConfigDir() {
-  if (process.env.OPENCODE_CONFIG_DIR) {
-    return path.resolve(process.env.OPENCODE_CONFIG_DIR);
-  }
-
-  if (process.platform === "win32") {
-    const appData = process.env.APPDATA ?? path.join(os.homedir(), "AppData", "Roaming");
-    return path.join(appData, "opencode");
-  }
-
-  const configHome = process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config");
-  return path.join(configHome, "opencode");
-}
+export { defaultConfigDir };
 
 async function readJsonIfExists(filePath) {
   try {

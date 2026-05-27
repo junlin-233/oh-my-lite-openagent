@@ -1,10 +1,18 @@
 import os from "node:os";
 import path from "node:path";
+import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const installModule = await import(pathToFileURL(path.resolve(process.cwd(), "scripts/install.mjs")).href);
-const defaultConfigDir = installModule.defaultConfigDir as () => string;
+const installPathsModule = await import(pathToFileURL(path.resolve(process.cwd(), "scripts/install-paths.mjs")).href);
+const defaultConfigDir = installPathsModule.defaultConfigDir as () => string;
+
+it("re-exports the shared default config directory helper from the installer", () => {
+  const installScript = readFileSync(path.resolve(process.cwd(), "scripts/install.mjs"), "utf8");
+
+  expect(installScript).toContain('import { defaultConfigDir } from "./install-paths.mjs";');
+  expect(installScript).toContain("export { defaultConfigDir };");
+});
 
 describe("installer default config directory", () => {
   const originalOpencodeConfigDir = process.env.OPENCODE_CONFIG_DIR;

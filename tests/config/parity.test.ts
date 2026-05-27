@@ -20,11 +20,7 @@ const managedConfigModule = await import(
 const config = managedConfigModule.MANAGED_CONFIG as {
   agent: Record<string, { mode: string; hidden?: boolean }>;
 };
-const installModule = await import(pathToFileURL(path.resolve(process.cwd(), "scripts/install.mjs")).href);
-const installerRoleModelProfiles = installModule.ROLE_MODEL_PROFILES as Array<{
-  role: string;
-  recommendations: string[];
-}>;
+const installScript = readFileSync(path.resolve(process.cwd(), "scripts/install.mjs"), "utf8");
 
 describe("config and runtime parity", () => {
   it("keeps managed agent registration aligned with role contracts", () => {
@@ -69,15 +65,30 @@ describe("config and runtime parity", () => {
   });
 
   it("keeps installer and runtime role model recommendation priority aligned", () => {
+    const roleModelProfileBlock = installScript.match(
+      /export const ROLE_MODEL_PROFILES = \[([\s\S]*?)\n\];/,
+    )?.[1];
+    expect(roleModelProfileBlock).toBeTruthy();
+    if (!roleModelProfileBlock) throw new Error("Missing installer ROLE_MODEL_PROFILES block");
+
     const runtimePatterns = Object.fromEntries(
       (RUNTIME_ROLE_MODEL_PROFILES as readonly RoleModelProfile[]).map((profile) => [
         profile.role,
         profile.recommendations.map((recommendation) => recommendation.pattern),
       ]),
     );
-    const installerPatterns = Object.fromEntries(
-      installerRoleModelProfiles.map((profile) => [profile.role, profile.recommendations]),
-    );
+    const installerPatterns: Record<string, string[]> = {};
+    for (const match of roleModelProfileBlock.matchAll(
+      /role: "([^"]+)"[\s\S]*?recommendations: \[([\s\S]*?)\]/g,
+    )) {
+      const roleName = match[1];
+      const recommendationsBlock = match[2];
+      if (!roleName || !recommendationsBlock) continue;
+      installerPatterns[roleName] = Array.from(
+        recommendationsBlock.matchAll(/"([^"]+)"/g),
+        (item) => item[1] ?? "",
+      ).filter(Boolean);
+    }
 
     expect(installerPatterns).toEqual(runtimePatterns);
   });
