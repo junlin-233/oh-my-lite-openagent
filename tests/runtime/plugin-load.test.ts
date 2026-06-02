@@ -49,6 +49,47 @@ describe("plugin safety", () => {
     expect(toolNames.every((toolName) => /^[a-zA-Z0-9_-]+$/.test(toolName))).toBe(true);
   });
 
+  it("returns promises from bounded lite tools and hooks", async () => {
+    const hooks = await createBoundedLitePlugin({
+      directory: process.cwd(),
+    });
+
+    const routeResult = hooks.tool?.bounded_lite_route?.execute(
+      { category: "execution" },
+      { directory: process.cwd() },
+    );
+    const backgroundResult = hooks.tool?.bounded_lite_background?.execute(
+      {},
+      { directory: process.cwd() },
+    );
+    const runtimeProfileResult = hooks.tool?.bounded_lite_runtime_profile?.execute(
+      {},
+      { directory: process.cwd() },
+    );
+    const permissionResult = hooks["permission.ask"]?.(
+      { tool: "bounded_lite_route", action: "execute" },
+      { status: "deny" },
+    );
+
+    expect(routeResult).toBeInstanceOf(Promise);
+    expect(backgroundResult).toBeInstanceOf(Promise);
+    expect(runtimeProfileResult).toBeInstanceOf(Promise);
+    expect(permissionResult).toBeInstanceOf(Promise);
+    const routeOutput = await routeResult;
+    const backgroundOutput = await backgroundResult;
+    const runtimeProfileOutput = await runtimeProfileResult;
+
+    expect(typeof routeOutput).toBe("string");
+    expect(typeof backgroundOutput).toBe("string");
+    expect(typeof runtimeProfileOutput).toBe("string");
+    expect(JSON.parse(routeOutput as string)).toMatchObject({ targetRole: "command-lead" });
+    expect(JSON.parse(backgroundOutput as string)).toEqual([]);
+    expect(JSON.parse(runtimeProfileOutput as string)).toMatchObject({
+      mode: "full",
+      visibleModes: ["execution", "planning", "deep-planning"],
+    });
+  });
+
   it("allows bounded lite plugin tools without extra permission prompts", async () => {
     const hooks = await Promise.resolve(
       createBoundedLitePlugin({
@@ -77,7 +118,7 @@ describe("plugin safety", () => {
     try {
       await writeFile(path.join(configDir, "opencode.json"), `${JSON.stringify({ agent: {} })}\n`);
 
-      const hooks = createBoundedLitePlugin(
+      const hooks = await createBoundedLitePlugin(
         { directory: process.cwd() },
         { configDir },
       );
@@ -130,7 +171,7 @@ describe("plugin safety", () => {
       );
       const agentsDir = path.join(configDir, "agents");
 
-      const hooks = createBoundedLitePlugin(
+      const hooks = await createBoundedLitePlugin(
         { directory: process.cwd() },
         { configDir },
       );

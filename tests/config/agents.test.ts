@@ -59,6 +59,20 @@ describe("OpenCode agent topology", () => {
     expect(config.command?.["agent-models"]?.template).toContain("ask whether they want changes");
   });
 
+  it("registers a /go command for non-interactive goal completion", () => {
+    expect(config.command?.go).toMatchObject({
+      agent: "command-lead",
+    });
+    expect(config.command?.go?.description).toContain("non-interactive agentic goal workflow");
+    expect(config.command?.go?.template).toContain("Go Protocol");
+    expect(config.command?.go?.template).toContain("$ARGUMENTS");
+    expect(config.command?.go?.template).toContain("non-interactive agentic goal-completion workflow");
+    expect(config.command?.go?.template).toContain("without asking clarification or preference questions");
+    expect(config.command?.go?.template).toContain("continue until verification and acceptance criteria succeed");
+    expect(config.command?.go?.template).toContain("Do not commit, push, publish");
+    expect(config.command?.go?.template).toContain("hard blocker");
+  });
+
   it("registers eight bounded roles plus disabled built-in overrides", () => {
     expect(Object.keys(config.agent)).toHaveLength(10);
     expect(config.agent.build).toMatchObject({ mode: "subagent", hidden: true });
@@ -214,6 +228,30 @@ describe("OpenCode agent topology", () => {
     expect(promptText).toContain("escalate with the blockers");
   });
 
+  it("requires Command Lead Go Protocol to stay non-interactive and bounded", () => {
+    const promptText = readPrompt("command-lead");
+
+    expect(promptText).toContain("## Go Protocol");
+    expect(promptText).toContain("managed `/go` command");
+    expect(promptText).toContain("non-interactive agentic goal-completion workflow");
+    expect(promptText).toContain("do not ask clarification or preference questions during the workflow");
+    expect(promptText).toContain("Continue through goal intake, evidence gathering, strategy selection");
+    expect(promptText).toContain("verification and acceptance criteria succeed");
+    expect(promptText).toContain("Do not commit, push, publish");
+    expect(promptText).toContain("hard blocker prevents completion");
+    expect(promptText).toContain("limited to execution, planning, and deep planning");
+  });
+
+  it("lets Command Lead present bounded user choices through the Question tool", () => {
+    const promptText = readPrompt("command-lead");
+
+    expect(promptText).toContain("## User Decision Selector");
+    expect(promptText).toContain("Question tool");
+    expect(promptText).toContain("2-5 user-facing options");
+    expect(promptText).toContain("Custom / other");
+    expect(promptText).toContain("Ask at most 3 decision questions");
+  });
+
   it("requires Command Lead to persist plan artifacts under .liteagent", () => {
     const promptText = readPrompt("command-lead");
 
@@ -258,6 +296,11 @@ describe("OpenCode agent topology", () => {
     expect(promptText).toContain("Deleting plan artifact files or removing/changing index entries is allowed only when the user explicitly asks");
     expect(promptText).toContain("does not grant execution dispatch, final approval, or canonical state advancement authority");
     expect(promptText).toContain("recommended_next_step: deep_plan_builder");
+    expect(promptText).toContain("## Decision Selector Discipline");
+    expect(promptText).toContain("Question tool");
+    expect(promptText).toContain("technology stack");
+    expect(promptText).toContain("Custom / other");
+    expect(promptText).toContain("[User Confirmed]");
   });
 
   it("allows Deep Plan Builder to write .liteagent plan artifacts without owning execution", () => {
@@ -273,6 +316,11 @@ describe("OpenCode agent topology", () => {
       ".liteagent/**": "allow",
     });
     expect(promptText).toContain("Direct plan persistence does not grant execution dispatch, final approval, or canonical state advancement authority");
+    expect(promptText).toContain("## Decision Selector Discipline");
+    expect(promptText).toContain("Question tool");
+    expect(promptText).toContain("migration strategy");
+    expect(promptText).toContain("Custom / other");
+    expect(promptText).toContain("[User Confirmed]");
   });
 
   it("requires Task Lead and reviewers to request scoped evidence when needed", () => {

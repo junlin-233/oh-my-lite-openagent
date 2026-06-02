@@ -82,6 +82,20 @@ Workflow:
 
 Do not create new Task Lead agents; profiles are dispatch metadata for the single hidden task-lead agent.`;
 
+const GO_COMMAND_TEMPLATE = `Run Go Protocol for this user goal:
+$ARGUMENTS
+
+Treat $ARGUMENTS as the user's goal and work as a non-interactive agentic goal-completion workflow through command-lead.
+
+Workflow:
+1. Infer practical acceptance criteria from the goal and repository conventions without asking clarification or preference questions.
+2. Gather scoped evidence before touching sensitive surfaces, then choose the lightest safe strategy: direct execution, bounded planning, or delegated subtasks.
+3. Implement the goal, verify the result, and continue until verification and acceptance criteria succeed.
+4. Close with a concise summary of what changed and any remaining limitations.
+
+Do not commit, push, publish, perform destructive actions, or write external/user-local config unless the user explicitly requested that action in the goal.
+If a safety, permission, missing-secret, impossible-condition, or explicit-authorization hard blocker prevents completion, stop and return a blocked report naming the blocker and the required authorization or condition.`;
+
 export const MANAGED_CONFIG = {
   "$schema": "https://opencode.ai/config.json",
   "default_agent": "command-lead",
@@ -90,6 +104,11 @@ export const MANAGED_CONFIG = {
       "description": "Configure per-role models and Task Lead profile assignments with bounded_lite_model_config.",
       "agent": "command-lead",
       "template": AGENT_MODELS_COMMAND_TEMPLATE
+    },
+    "go": {
+      "description": "Run a non-interactive agentic goal workflow through Command Lead.",
+      "agent": "command-lead",
+      "template": GO_COMMAND_TEMPLATE
     }
   },
   "permission": {
@@ -125,6 +144,7 @@ export const MANAGED_CONFIG = {
       "description": "Main orchestrator for execution work with approval and state ownership.",
       "prompt": "{file:./.opencode/agents/command-lead.md}",
       "permission": {
+        "question": "allow",
         "task": {
           "*": "deny",
           "plan-builder": "allow",
@@ -142,6 +162,7 @@ export const MANAGED_CONFIG = {
       "description": "Visible planner with explicit discussion mode for user-facing planning and internal normalize mode for stable skeleton convergence.",
       "prompt": "{file:./.opencode/agents/plan-builder.md}",
       "permission": {
+        "question": "allow",
         "task": {
           "*": "deny",
           "explore": "allow",
@@ -159,6 +180,7 @@ export const MANAGED_CONFIG = {
       "description": "Visible deep planner that produces detailed handoff plans for lower-strength executors with mandatory plan review.",
       "prompt": "{file:./.opencode/agents/deep-plan-builder.md}",
       "permission": {
+        "question": "allow",
         "task": {
           "*": "deny",
           "explore": "allow",

@@ -526,10 +526,14 @@ function isModelSourceFilter(value: unknown): value is ModelProviderSource | "al
   );
 }
 
-export function createBoundedLitePlugin(
+function formatToolJsonOutput(value: unknown): string {
+  return JSON.stringify(value, null, 2);
+}
+
+export async function createBoundedLitePlugin(
   _input: PluginInput,
   rawOptions?: Record<string, unknown>,
-): PluginHooks {
+): Promise<PluginHooks> {
   const options = normalizePluginOptions(rawOptions as BoundedLitePluginOptions | undefined);
   const runtimeProfile = createRuntimeProfile({
     pluginEnabled: options.mode === "full",
@@ -540,7 +544,7 @@ export function createBoundedLitePlugin(
   const background = new BackgroundCoordinator();
 
   return {
-    config() {
+    async config() {
       if (options.maxChildDepth > MAX_CHILD_ORCHESTRATOR_DEPTH) {
         throw new Error(
           `maxChildDepth must stay <= ${MAX_CHILD_ORCHESTRATOR_DEPTH} to preserve bounded orchestration.`,
@@ -550,38 +554,38 @@ export function createBoundedLitePlugin(
     tool: {
       bounded_lite_route: {
         description: "Resolve a bounded internal routing category to its target role.",
-        execute(args) {
+        async execute(args) {
           const category = args["category"];
 
           if (!isRoutingCategory(category)) {
             throw new Error("Route tool requires a valid bounded routing category.");
           }
 
-          return resolveCategoryRoute(category);
+          return formatToolJsonOutput(resolveCategoryRoute(category));
         },
       },
       bounded_lite_plan_dag: {
         description: "Validate a required plan.subtasks payload and return bounded DAG waves plus dispatch profiles.",
-        execute(args) {
+        async execute(args) {
           const payload = args["payload"];
           const dispatch = mergeTaskDispatchWithConfiguredProfiles(
             isRecord(args["dispatch"]) ? args["dispatch"] : {},
             options,
           );
 
-          return buildTaskDAG(payload, dispatch as Partial<TaskDispatchConfig>);
+          return formatToolJsonOutput(buildTaskDAG(payload, dispatch as Partial<TaskDispatchConfig>));
         },
       },
       bounded_lite_plan_readiness: {
         description: "Validate a Plan Builder artifact against readiness gates before Command Lead dispatches execution.",
-        execute(args) {
+        async execute(args) {
           const payload = args["payload"];
           const dispatch = mergeTaskDispatchWithConfiguredProfiles(
             isRecord(args["dispatch"]) ? args["dispatch"] : {},
             options,
           );
 
-          return validatePlanReadiness(payload, dispatch as Partial<TaskDispatchConfig>);
+          return formatToolJsonOutput(validatePlanReadiness(payload, dispatch as Partial<TaskDispatchConfig>));
         },
       },
       bounded_lite_plan_artifact: {
@@ -628,14 +632,14 @@ export function createBoundedLitePlugin(
       },
       bounded_lite_background: {
         description: "List currently tracked background tasks from the bounded coordinator.",
-        execute() {
-          return background.list();
+        async execute() {
+          return formatToolJsonOutput(background.list());
         },
       },
       bounded_lite_runtime_profile: {
         description: "Report the current runtime profile without creating a second control plane.",
-        execute() {
-          return runtimeProfile;
+        async execute() {
+          return formatToolJsonOutput(runtimeProfile);
         },
       },
       bounded_lite_model_config: {
@@ -929,17 +933,17 @@ If no provider models are found, tell the user to configure or connect OpenCode 
         },
       },
     },
-    "permission.ask"(input, output) {
+    async "permission.ask"(input, output) {
       if (input.tool.startsWith("bounded_lite_")) {
         output.status = "allow";
       }
     },
-    "tool.execute.before"(input, output) {
+    async "tool.execute.before"(input, output) {
       if (input.tool === "bounded_lite_route") {
         output.args = { ...output.args };
       }
     },
-    "tool.execute.after"(_input, output) {
+    async "tool.execute.after"(_input, output) {
       output.output = output.output;
     },
   };

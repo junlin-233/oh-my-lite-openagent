@@ -214,11 +214,19 @@ function testConfigIntegrity() {
   const template = config.command["agent-models"].template;
   assert(template.includes('action: "import"'), "命令模板提及 import 模式");
   assert(template.includes('action: "auto"'), "命令模板提及 auto 模式");
-  assert(template.includes("- list:"), "命令模板提及 list 模式");
-  assert(template.includes('action: "apply"'), "命令模板提及 apply 模式");
+  assert(template.includes("action=auto is recommendation-only"), "命令模板说明 auto 仅推荐");
+  assert(template.includes("Apply after approval"), "命令模板提及批准后 apply");
   assert(template.includes("bounded_lite_model_config"), "命令模板提及工具名");
   assert(template.includes("Task Lead profile"), "命令模板提及 Task Lead profile");
   assert(template.includes("taskLeadProfileAssignments"), "命令模板提及 profile 写入参数");
+  assert(config.command && config.command.go, "/go 命令已注册");
+  const goTemplate = config.command.go.template;
+  assert(config.command.go.agent === "command-lead", "/go 命令指向 command-lead");
+  assert(goTemplate.includes("Go Protocol"), "/go 模板提及 Go Protocol");
+  assert(goTemplate.includes("$ARGUMENTS"), "/go 模板使用 $ARGUMENTS");
+  assert(goTemplate.includes("non-interactive agentic goal-completion workflow"), "/go 模板说明非交互目标完成 workflow");
+  assert(goTemplate.includes("without asking clarification or preference questions"), "/go 模板禁止澄清或偏好问题");
+  assert(goTemplate.includes("Do not commit, push, publish"), "/go 模板保留提交发布安全边界");
 
   // 3.2 角色表覆盖
   const agentNames = Object.keys(config.agent);
@@ -248,7 +256,7 @@ function testConfigIntegrity() {
   assert(pluginContent.includes('action === "apply"'), "插件支持 apply action");
   assert(pluginContent.includes("resolveAutoModels"), "插件导入 resolveAutoModels");
   assert(pluginContent.includes("formatAutoModelReport"), "插件导入 formatAutoModelReport");
-  assert(pluginContent.includes("Recommend role model assignments"), "工具描述包含 auto 推荐说明");
+  assert(pluginContent.includes("recommend role and Task Lead profile model assignments"), "工具描述包含 auto 推荐说明");
 }
 
 // ============================================================================
@@ -282,6 +290,8 @@ function testReminder() {
   console.log("\n  要验证 /agent-models auto，请在 OpenCode 中执行：");
   console.log("    /agent-models");
   console.log("    然后先选择 action=import，再选择 action=auto");
+  console.log("\n  要验证 /go agentic workflow，请在 OpenCode 中执行：");
+  console.log("    /go add a focused test for the feature I just described");
 }
 
 // ============================================================================

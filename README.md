@@ -14,10 +14,12 @@ Tired of complicated agent frameworks? Try Oh My Lite! It stays lightweight whil
 - `task-lead`, `explore`, `librarian`, `plan-review`, `result-review`: hidden bounded subagents.
 - Task Lead profiles (`quick`, `code`, `research`, `writing`, `visual`, `deep`, `risk-high`) map plan attributes to dispatch metadata and model recommendations without adding real agents.
 - Each role maintains its own local todo list following OpenCode-style task tracking, but todos do not replace artifacts or canonical state.
+- Visible decision-making roles (`command-lead`, `plan-builder`, and `deep-plan-builder`) may use OpenCode's `Question tool` for bounded blocking choices; hidden internal roles stay out of the user-facing decision loop.
+- `plan-builder` and `deep-plan-builder` include Decision Selector Discipline so blocking choices are presented as 2-5 concrete options, with `Custom / other` available when user-supplied input is valid.
 - `result-review` is optional and user-selectable. It reviews Command Lead execution summaries/final integrated results, not Task Lead child task returns.
 - Delegating roles use an explicit assignment template: `TASK`, `EXPECTED OUTCOME`, `ROLE`, `SCOPE`, `UPSTREAM EVIDENCE`, `REQUIRED TOOLS`, `MUST DO`, `MUST NOT DO`, `CONTEXT`, `DELIVERABLE FORMAT`, and `FAILURE RETURN`.
 - Durable plan artifacts are written to `.liteagent/plans/`, with an append-only index at `.liteagent/plan-index.jsonl`.
-- Provider-compatible plugin tools: `bounded_lite_route`, `bounded_lite_plan_dag`, `bounded_lite_plan_readiness`, `bounded_lite_plan_artifact`, `bounded_lite_background`, `bounded_lite_runtime_profile`, `bounded_lite_model_config`.
+- Provider-compatible async plugin tools: `bounded_lite_route`, `bounded_lite_plan_dag`, `bounded_lite_plan_readiness`, `bounded_lite_plan_artifact`, `bounded_lite_background`, `bounded_lite_runtime_profile`, `bounded_lite_model_config`.
 - OpenCode's native `build` and `plan` modes are hidden and disabled.
 - The global installer preserves your existing model, provider, API key, plugin, and custom agent settings.
 
@@ -106,6 +108,8 @@ The installer writes `.bak` backups only for target files that already exist, su
 
 Managed command-line permissions are intentionally permissive for the eight real roles: bash defaults to `allow`, and only dangerous or sensitive commands ask for confirmation. Examples include destructive file operations, system privilege/permission commands, commands that modify git history or remotes, npm publish/remove/version commands, installer commands that actually write OpenCode global config, and pipe/eval forms that execute downloaded content. This bash policy lives in global `permission.bash`; if the user already has a custom `permission` object but no `bash` entry, the installer backfills the managed bash policy while preserving the user's other permission settings. If the user has explicitly configured `permission.bash`, the installer preserves it. The disabled OpenCode built-in `build` and `plan` overrides remain fully denied.
 
+For OpenCode runtime compatibility, managed plugin hooks and tool handlers return promises. JSON-shaped tool results such as route resolution, plan DAG validation, readiness checks, background task lists, and runtime profiles are serialized as formatted JSON strings so provider/tool transports receive stable text output.
+
 Default config directories:
 
 ```text
@@ -132,6 +136,26 @@ Interactive model configuration:
 ```bash
 oh-my-lite-openagent --interactive
 ```
+
+
+## Agentic Goal Workflow Command
+
+Run this inside the OpenCode TUI:
+
+```text
+/go <goal>
+```
+
+`/go` sends the goal to `command-lead` as a non-interactive Go Protocol workflow. Command Lead infers practical acceptance criteria from the goal and repository conventions, gathers scoped evidence, chooses the lightest safe strategy, implements or delegates bounded work, verifies the result, and continues until the acceptance criteria pass or a hard blocker is reached.
+
+Examples:
+
+```text
+/go add tests for the managed command registration
+/go update the README with a concise installation troubleshooting note
+```
+
+`/go` is a workflow command, not a new OpenCode mode or agent. It does not commit, push, publish, perform destructive actions, or write external/user-local OpenCode config unless the goal explicitly requests and authorizes that action.
 
 
 ## Role and Task Lead Profile Model Configuration
@@ -351,6 +375,8 @@ npm run install:opencode
 - Do not turn hidden subagents into autonomous control planes.
 - Each role's todo list is only that role's working memory and does not replace canonical state or artifact records.
 - Keep Result Review optional and limited to Command Lead-owned execution summaries.
+- Use the Question tool only for bounded blocking choices in visible decision-making roles; record user-selected planning decisions in artifacts when they affect scope, acceptance, or strategy.
 - Delegated tasks must be explicit and bounded; do not use hidden initiator markers, and do not request whole-repo unbounded searches.
 - Plugin tool names must be provider-compatible: `^[a-zA-Z0-9_-]+$`.
+- Plugin hooks and tool handlers should be async-compatible and return stable provider-safe outputs.
 - Preserve the user's provider, model, and API configuration during installation.

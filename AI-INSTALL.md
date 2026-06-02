@@ -12,7 +12,7 @@ https://github.com/junlin-233/oh-my-lite-openagent
 
 Make Oh My Lite OpenAgent work globally for OpenCode with the best model for each role.
 
-After installation, the user should be able to run `opencode` from any directory and get `command-lead` as the default agent with the plugin tools loaded, and each role should have an appropriate model assigned.
+After installation, the user should be able to run `opencode` from any directory and get `command-lead` as the default agent with the plugin tools loaded, `/go` and `/agent-models` registered as managed commands, and each role should have an appropriate model assigned.
 
 ## Step 1: Install
 
@@ -112,8 +112,11 @@ Confirm:
 - `command-lead` tools include `bounded_lite_runtime_profile`.
 - `command-lead` tools include `bounded_lite_model_config`.
 - `/agent-models` is registered in OpenCode commands.
+- `/go` is registered in OpenCode commands and targets `command-lead`.
 - `build` mode is `subagent`.
 - `plan` mode is `subagent`.
+
+The managed plugin hooks and tool handlers are async-compatible. JSON-shaped tool results, such as route resolution or runtime profile output, are returned as formatted JSON strings for stable provider/tool transport behavior.
 
 Then check model assignments:
 
@@ -182,9 +185,20 @@ Inside OpenCode, type `/agent-models`. The command-lead agent will call `bounded
 - **`action=list`**: Show every role's current model, Task Lead profile model, and all discovered models.
 - **`action=apply`**: Manually assign specific imported models. Example: `{ action: "apply", assignments: { "command-lead": "openai/gpt-5.4" }, taskLeadProfileAssignments: { "code": "opencode/claude-sonnet-4-6" } }`
 
+## How /go Works
+
+Inside OpenCode, type `/go <goal>`. The command sends `$ARGUMENTS` to `command-lead` as a non-interactive Go Protocol workflow. Command Lead should infer practical acceptance criteria from the goal and repository conventions, gather scoped evidence, choose the lightest safe strategy, implement or delegate bounded work, verify the result, and continue until acceptance passes or a hard blocker is reached.
+
+`/go` is a workflow command, not a new mode or agent. It must not commit, push, publish, perform destructive actions, or write external/user-local OpenCode config unless the user explicitly requests and authorizes that action.
+
+## Planning Questions
+
+The visible decision-making roles (`command-lead`, `plan-builder`, and `deep-plan-builder`) may use OpenCode's `Question tool` for bounded blocking choices. Plan Builder and Deep Plan Builder should present 2-5 concrete options, include a recommended option when evidence supports one, include `Custom / other` when user-supplied input is valid, and record user-confirmed decisions in the plan artifact when they affect scope, acceptance, or strategy.
+
 ## Success Condition
 
 Installation and model configuration is complete when:
 
 1. `opencode debug agent command-lead` shows `native: false` and all `bounded_lite_*` tools are present.
-2. Each role has a `model` field in `opencode debug config` matching one of the user's available provider models.
+2. `/go` and `/agent-models` are available as OpenCode commands.
+3. Each role has a `model` field in `opencode debug config` matching one of the user's available provider models.
