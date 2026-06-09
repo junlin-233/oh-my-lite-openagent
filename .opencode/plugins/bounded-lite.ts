@@ -9,7 +9,9 @@ import { buildTaskDAG, type TaskDispatchConfig } from "../lib/runtime/plan-dag.j
 import { validatePlanReadiness } from "../lib/runtime/plan-readiness.js";
 import {
   ensureOpenPlanIndexHealthyOnce,
+  parseFrontmatter,
   rebuildOpenPlanIndex,
+  resolveOpenPlanRoot,
   writePlanArtifact,
 } from "../lib/runtime/plan-artifact.js";
 import { createRuntimeProfile } from "../lib/runtime/safety.js";
@@ -701,11 +703,8 @@ type PlanArtifactRequest =
     operation: "create" | "update";
     title?: string;
     markdown?: string;
-    sessionKey: string;
-    sessionStartedAt: string;
     filenameHint?: string;
     generatedBy: string;
-    planId?: string;
     status?: "draft" | "reviewed" | "blocked";
     maturityLevel?: string;
     targetPlanRef?: string;
@@ -719,6 +718,129 @@ type PlanArtifactRequest =
     generatedBy?: string;
     reason?: string;
   };
+
+interface RuntimePlanArtifactSession {
+  sessionKey: string;
+  sessionStartedAt: string;
+}
+
+interface PersistedPlanArtifactSession extends RuntimePlanArtifactSession {
+  path: string;
+  updatedAt: string;
+}
+
+function createRuntimePlanArtifactSession(now: Date = new Date()): RuntimePlanArtifactSession {
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  const hour = String(now.getHours()).padStart(2, "0");
+  const minute = String(now.getMinutes()).padStart(2, "0");
+  const suffix = Math.random().toString(36).slice(2, 10).padEnd(8, "0").slice(0, 8);
+
+  return {
+    sessionKey: `${year}${month}${day}-${hour}${minute}-${suffix}`,
+    sessionStartedAt: now.toISOString(),
+  };
+}
+
+function normalizePlanArtifactPath(value: string): string {
+  return value.replaceAll("\\", "/").replace(/^\.\//, "").trim();
+}
+
+async function readPersistedPlanArtifactSessionFromTarget(
+  openPlanRoot: string,
+  targetPlanRef: string,
+): Promise<RuntimePlanArtifactSession> {
+  const absolutePath = path.join(openPlanRoot, ...targetPlanRef.split("/"));
+  let content: string;
+  try {
+    content = await readFile(absolutePath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+      throw new Error(`PLANART_ERR_TARGET_NOT_FOUND: target plan does not exist: ${targetPlanRef}`);
+    }
+    throw error;
+  }
+  const frontmatter = parseFrontmatter(content);
+  const sessionKey = typeof frontmatter.session_key === "string" ? frontmatter.session_key.trim() : "";
+  const sessionStartedAt = typeof frontmatter.session_started_at === "string" ? frontmatter.session_started_at.trim() : "";
+  if (!sessionKey || !sessionStartedAt) {
+    throw new Error("PLANART_ERR_INVALID_SESSION_CONTEXT: target plan is missing session metadata.");
+  }
+  return { sessionKey, sessionStartedAt };
+}
+
+async function readPersistedPlanArtifactSessions(openPlanRoot: string): Promise<PersistedPlanArtifactSession[]> {
+  const indexPath = path.join(openPlanRoot, "index.jsonl");
+  let content: string;
+
+  try {
+    content = await readFile(indexPath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+      throw new Error("PLANART_ERR_NO_SESSION_CANDIDATE: current session has no persisted plan to update; cannot default update.");
+    }
+    throw error;
+  }
+
+  return content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== "")
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
+    .map((record) => ({
+      path: typeof record.path === "string" ? record.path : "",
+      sessionKey: typeof record.session_key === "string" ? record.session_key : "",
+      sessionStartedAt: typeof record.session_started_at === "string" ? record.session_started_at : "",
+      updatedAt: typeof record.updated_at === "string" ? record.updated_at : "",
+    }))
+    .filter((record): record is PersistedPlanArtifactSession => (
+      record.path !== "" && record.sessionKey !== "" && record.sessionStartedAt !== "" && record.updatedAt !== ""
+    ));
+}
+
+async function resolveUpdatePlanArtifactSession(
+  request: Extract<PlanArtifactRequest, { action: "write" }>,
+  configDir?: string,
+): Promise<RuntimePlanArtifactSession> {
+  const openPlanRoot = resolveOpenPlanRoot(configDir);
+
+  if (request.targetPlanRef) {
+    const targetPlanRef = normalizePlanArtifactPath(request.targetPlanRef);
+    return readPersistedPlanArtifactSessionFromTarget(openPlanRoot, targetPlanRef);
+  }
+
+  if (request.operation === "update") {
+    const records = (await readPersistedPlanArtifactSessions(openPlanRoot))
+      .sort((left, right) => {
+        if (left.updatedAt !== right.updatedAt) return right.updatedAt.localeCompare(left.updatedAt);
+        return right.path.localeCompare(left.path);
+      });
+
+    const latest = records[0];
+    if (!latest) {
+      throw new Error("PLANART_ERR_NO_SESSION_CANDIDATE: current session has no persisted plan to update; cannot default update.");
+    }
+
+    return { sessionKey: latest.sessionKey, sessionStartedAt: latest.sessionStartedAt };
+  }
+
+  const records = await readPersistedPlanArtifactSessions(openPlanRoot);
+
+  if (records.length === 0) {
+    throw new Error("PLANART_ERR_NO_SESSION_CANDIDATE: current session has no persisted plan to update; cannot default update.");
+  }
+
+  records.sort((left, right) => {
+    if (left.updatedAt !== right.updatedAt) return right.updatedAt.localeCompare(left.updatedAt);
+    return right.path.localeCompare(left.path);
+  });
+
+  return {
+    sessionKey: records[0]?.sessionKey ?? "",
+    sessionStartedAt: records[0]?.sessionStartedAt ?? "",
+  };
+}
 
 function toToolOutput(value: unknown): { output: string; metadata: Record<string, unknown> } {
   return {
@@ -796,16 +918,24 @@ function parsePlanArtifactError(error: unknown, action: "write" | "rebuild" = "w
   applied: false;
   code: string;
   message: string;
+  expected?: { action: Array<"write" | "rebuild"> };
 } {
   const message = error instanceof Error ? error.message : String(error);
   const match = message.match(/^(PLANART_ERR_[A-Z_]+):\s*(.*)$/);
+  const code = match?.[1] ?? "PLANART_ERR_RUNTIME";
+  const details = match?.[2] ?? message;
 
   return {
     ok: false,
     action,
     applied: false,
-    code: match?.[1] ?? "PLANART_ERR_RUNTIME",
-    message: match?.[2] ?? message,
+    code,
+    message: details,
+    ...(
+      code === "PLANART_ERR_MISSING_ACTION" || code === "PLANART_ERR_UNKNOWN_ACTION"
+        ? { expected: { action: ["write", "rebuild"] as Array<"write" | "rebuild"> } }
+        : {}
+    ),
   };
 }
 
@@ -816,6 +946,19 @@ function parsePlanArtifactRequest(payload: unknown): PlanArtifactRequest {
 
   const hasOwn = (key: string): boolean => Object.prototype.hasOwnProperty.call(payload, key);
 
+  if (
+    hasOwn("sessionKey") ||
+    hasOwn("session_key") ||
+    hasOwn("sessionStartedAt") ||
+    hasOwn("session_started_at") ||
+    hasOwn("planId") ||
+    hasOwn("plan_id")
+  ) {
+    throw new Error(
+      "PLANART_ERR_LEGACY_SYSTEM_IDENTITY_FORBIDDEN: sessionKey/sessionStartedAt/planId are system-owned and must not be provided.",
+    );
+  }
+
   const allowedFields = new Set([
     "action",
     "operation",
@@ -823,16 +966,10 @@ function parsePlanArtifactRequest(payload: unknown): PlanArtifactRequest {
     "title",
     "markdown",
     "content",
-    "sessionKey",
-    "session_key",
-    "sessionStartedAt",
-    "session_started_at",
     "filenameHint",
     "filename_hint",
     "generatedBy",
     "generated_by",
-    "planId",
-    "plan_id",
     "sourceSessionKey",
     "source_session_key",
     "sourcePlanRef",
@@ -867,9 +1004,6 @@ function parsePlanArtifactRequest(payload: unknown): PlanArtifactRequest {
     const rebuildGeneratedBy = readString(payload["generatedBy"]) ?? readString(payload["generated_by"]);
     const rebuildReason = readString(payload["reason"]);
 
-    if (hasAny("operation")) {
-      throw new Error("PLANART_ERR_REBUILD_OPERATION_FORBIDDEN: rebuild does not accept operation.");
-    }
     if (hasAny("targetPlanRef", "target_plan_ref")) {
       throw new Error("PLANART_ERR_REBUILD_TARGET_FORBIDDEN: rebuild does not accept targetPlanRef.");
     }
@@ -905,11 +1039,8 @@ function parsePlanArtifactRequest(payload: unknown): PlanArtifactRequest {
   const title = readString(payload["title"]);
   const markdown = readString(payload["markdown"]) ?? readString(payload["content"]);
   const operation = readString(payload["operation"]) ?? "create";
-  const sessionKey = readString(payload["sessionKey"]) ?? readString(payload["session_key"]);
-  const sessionStartedAt = readString(payload["sessionStartedAt"]) ?? readString(payload["session_started_at"]);
   const filenameHint = readString(payload["filenameHint"]) ?? readString(payload["filename_hint"]);
   const generatedBy = readString(payload["generatedBy"]) ?? readString(payload["generated_by"]);
-  const planId = readString(payload["planId"]) ?? readString(payload["plan_id"]);
   const sourceSessionKey = readString(payload["sourceSessionKey"]) ?? readString(payload["source_session_key"]);
   const sourcePlanRef = readString(payload["sourcePlanRef"]) ?? readString(payload["source_plan_ref"]);
   const replacesSessionKey = readString(payload["replacesSessionKey"]) ?? readString(payload["replaces_session_key"]);
@@ -921,8 +1052,6 @@ function parsePlanArtifactRequest(payload: unknown): PlanArtifactRequest {
     throw new Error("PLANART_ERR_UNSUPPORTED_OPERATION: operation must be create or update.");
   }
 
-  if (!sessionKey) throw new Error("PLANART_ERR_MISSING_SESSION_KEY: sessionKey is required.");
-  if (!sessionStartedAt) throw new Error("PLANART_ERR_MISSING_SESSION_STARTED_AT: sessionStartedAt is required.");
   if (!generatedBy) throw new Error("PLANART_ERR_MISSING_GENERATED_BY: generatedBy is required.");
 
   const status = readString(payload["status"]);
@@ -960,13 +1089,10 @@ function parsePlanArtifactRequest(payload: unknown): PlanArtifactRequest {
   return {
     action: "write",
     operation,
-    sessionKey,
-    sessionStartedAt,
     generatedBy,
     ...(title ? { title } : {}),
     ...(markdown ? { markdown } : {}),
     ...(filenameHint ? { filenameHint } : {}),
-    ...(planId ? { planId } : {}),
     ...(sourceSessionKey ? { sourceSessionKey } : {}),
     ...(sourcePlanRef ? { sourcePlanRef } : {}),
     ...(replacesSessionKey ? { replacesSessionKey } : {}),
@@ -1047,6 +1173,7 @@ export function createBoundedLitePlugin(
   let planArtifactSelfCheckRan = false;
   let planArtifactSelfCheckFailure: { code: string; message: string } | undefined;
   let planArtifactSelfCheckPromise: Promise<void> | undefined;
+  let runtimePlanArtifactSession: RuntimePlanArtifactSession | undefined;
 
   return {
     config() {
@@ -1097,8 +1224,43 @@ export function createBoundedLitePlugin(
         },
       },
       bounded_lite_plan_artifact: {
-        description: "Persist a Command Lead-approved openplan artifact with create/update semantics, or rebuild openplan/index.jsonl from plan frontmatter.",
-        args: {},
+        description: `Persist a Command Lead-approved openplan artifact with create/update semantics, or rebuild openplan/index.jsonl from plan frontmatter.
+
+System-owned metadata:
+- create always injects sessionKey/sessionStartedAt from the runtime session
+- default create planId is system-generated
+- model-supplied sessionKey/sessionStartedAt/planId are rejected; Command Lead only provides semantic content
+- update restores session metadata from the persisted target or current-state index
+
+Examples:
+- create: { "action": "write", "operation": "create", "title": "My Plan", "filenameHint": "my-plan.md", "markdown": "# My Plan", "generatedBy": "command-lead" }
+- update: { "action": "write", "operation": "update", "targetPlanRef": "20260518-1030-a1b2c3d4/my-plan.md", "markdown": "# Updated", "generatedBy": "command-lead" }
+- rebuild: { "action": "rebuild", "reason": "manual repair" }`,
+        args: {
+          action: tool.schema.enum(["write", "rebuild"]),
+          operation: tool.schema.enum(["create", "update"]).optional(),
+          reason: tool.schema.string().optional(),
+          title: tool.schema.string().optional(),
+          markdown: tool.schema.string().optional(),
+          content: tool.schema.string().optional(),
+          filenameHint: tool.schema.string().optional(),
+          filename_hint: tool.schema.string().optional(),
+          generatedBy: tool.schema.string().optional(),
+          generated_by: tool.schema.string().optional(),
+          sourceSessionKey: tool.schema.string().optional(),
+          source_session_key: tool.schema.string().optional(),
+          sourcePlanRef: tool.schema.string().optional(),
+          source_plan_ref: tool.schema.string().optional(),
+          replacesSessionKey: tool.schema.string().optional(),
+          replaces_session_key: tool.schema.string().optional(),
+          replacesPlanRef: tool.schema.string().optional(),
+          replaces_plan_ref: tool.schema.string().optional(),
+          status: tool.schema.enum(["draft", "reviewed", "blocked"]).optional(),
+          maturityLevel: tool.schema.string().optional(),
+          maturity_level: tool.schema.string().optional(),
+          targetPlanRef: tool.schema.string().optional(),
+          target_plan_ref: tool.schema.string().optional(),
+        },
         async execute(args, context) {
           const requestedAction = readString(args["action"]) === "rebuild" ? "rebuild" : "write";
 
@@ -1126,6 +1288,11 @@ export function createBoundedLitePlugin(
             }
 
             const request = parsePlanArtifactRequest(args);
+            if (request.action === "write") {
+              if (request.operation !== "update") {
+                runtimePlanArtifactSession ??= createRuntimePlanArtifactSession();
+              }
+            }
             if (request.action === "rebuild") {
               const rebuilt = await rebuildOpenPlanIndex({
                 ...(options.configDir ? { configDir: options.configDir } : {}),
@@ -1157,17 +1324,22 @@ export function createBoundedLitePlugin(
               });
             }
 
+            const sessionContext = request.operation === "update"
+              ? await resolveUpdatePlanArtifactSession(request, options.configDir)
+              : (runtimePlanArtifactSession ?? createRuntimePlanArtifactSession());
+            runtimePlanArtifactSession = sessionContext;
             const result = await writePlanArtifact({
               projectRoot: resolveProjectRoot(context),
               action: request.action,
               operation: request.operation,
-              sessionKey: request.sessionKey,
-              sessionStartedAt: request.sessionStartedAt,
+              systemIdentity: {
+                sessionKey: sessionContext.sessionKey,
+                sessionStartedAt: sessionContext.sessionStartedAt,
+              },
               generatedBy: request.generatedBy,
               ...(request.title ? { title: request.title } : {}),
               ...(request.markdown ? { markdown: request.markdown } : {}),
               ...(request.filenameHint ? { filenameHint: request.filenameHint } : {}),
-              ...(request.planId ? { planId: request.planId } : {}),
               ...(request.sourceSessionKey ? { sourceSessionKey: request.sourceSessionKey } : {}),
               ...(request.sourcePlanRef ? { sourcePlanRef: request.sourcePlanRef } : {}),
               ...(request.replacesSessionKey ? { replacesSessionKey: request.replacesSessionKey } : {}),

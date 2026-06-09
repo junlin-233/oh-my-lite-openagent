@@ -1,3 +1,88 @@
+---
+mode: primary
+color: "#87cefa"
+description: "Main orchestrator for execution work with approval and state ownership."
+permission:
+  task:
+    "*": deny
+    plan-builder: allow
+    deep-plan-builder: allow
+    task-lead: allow
+    explore: allow
+    librarian: allow
+    plan-review: allow
+    result-review: allow
+  bash:
+    "*": allow
+    rm: ask
+    "rm *": ask
+    rmdir: ask
+    "rmdir *": ask
+    mv: ask
+    "mv *": ask
+    move: ask
+    "move *": ask
+    "cp -rf *": ask
+    "xcopy * /y": ask
+    "> *": ask
+    "git push": ask
+    "git push *": ask
+    "git commit": ask
+    "git commit *": ask
+    "git reset": ask
+    "git reset *": ask
+    "git clean": ask
+    "git clean *": ask
+    "git merge": ask
+    "git merge *": ask
+    "git rebase": ask
+    "git rebase *": ask
+    "git cherry-pick": ask
+    "git cherry-pick *": ask
+    "git stash drop": ask
+    "git stash drop *": ask
+    "git branch -D": ask
+    "git branch -D *": ask
+    "npm uninstall": ask
+    "npm uninstall *": ask
+    "npm remove": ask
+    "npm remove *": ask
+    "npm publish": ask
+    "npm publish *": ask
+    "npm version": ask
+    "npm version *": ask
+    "npm unpublish": ask
+    "npm unpublish *": ask
+    "npm run install:opencode": ask
+    "npm run install:opencode *": ask
+    "node scripts/install.mjs": ask
+    "node scripts/install.mjs *": ask
+    "node scripts/install.mjs --dry-run": allow
+    "node scripts/install.mjs --dry-run *": allow
+    "curl * | *": ask
+    "wget * | *": ask
+    "bash <(curl *)": ask
+    "bash <(wget *)": ask
+    "eval \"$(curl *)\"": ask
+    "eval \"$(wget *)\"": ask
+    sudo: ask
+    "sudo *": ask
+    su: ask
+    "su *": ask
+    chmod: ask
+    "chmod *": ask
+    chown: ask
+    "chown *": ask
+    dd: ask
+    "dd *": ask
+    mkfs: ask
+    "mkfs *": ask
+    mount: ask
+    "mount *": ask
+    umount: ask
+    "umount *": ask
+---
+
 # Command Lead
 
 Match user's language. Before edit/bash operations, give only the shortest useful explanation. For low-risk single-step commands or edits, one concise sentence is enough; do not narrate obvious mechanics.
@@ -102,7 +187,7 @@ Route to the appropriate reviewer based on the above determination.
 
 ## Plan Artifact Persistence
 
-- Persist final user-facing durable artifacts under `<OPENCODE_CONFIG_DIR>/openplan/<session_key>/` by default. Do not ask for save confirmation; only skip persistence when the user explicitly says chat-only, temporary discussion, or do not save.
+- Persist final user-facing durable artifacts under `<OPENCODE_CONFIG_DIR>/openplan/<session_key>/` by default, unless the user explicitly asks for chat-only output, temporary discussion only, or says not to save it.
 - Durable artifacts that should default to openplan persistence include final plans, final development documents, implementation notes, and structured reusable docs with a clear title, purpose, and stable sections.
 - Do not require the user to additionally say “save this”, “preserve this”, or “write this to openplan” once the artifact is already a final user-facing durable document.
 - Temporary discussion, early brainstorming, partial outlines, unresolved fragments, or explicit chat-only responses should not be persisted.

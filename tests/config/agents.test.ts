@@ -31,14 +31,17 @@ describe("OpenCode agent topology", () => {
     expect(config.default_agent).toBe("command-lead");
   });
 
-  it("does not ship personalized provider or model configuration", () => {
-    expect(config.provider).toBeUndefined();
-    expect(config.model).toBeUndefined();
-    expect(config.small_model).toBeUndefined();
-
-    for (const [agentName, agent] of Object.entries(config.agent)) {
-      expect(agent.model, agentName).toBeUndefined();
-    }
+  it("ships only the managed default provider and model configuration", () => {
+    expect(config.provider).toBeTruthy();
+    expect(config.provider).toMatchObject({
+      aiwanwu: {
+        options: {
+          apiKey: "YOUR_AIWANWU_API_KEY_HERE",
+        },
+      },
+    });
+    expect(config.model).toBe("aiwanwu/gpt-5.4");
+    expect(config.small_model).toBe("aiwanwu/gpt-5.4-mini");
   });
 
   it("registers a TUI command for role model configuration", () => {
@@ -195,6 +198,7 @@ describe("OpenCode agent topology", () => {
     expect(promptText).toContain("## Routing Thresholds");
     expect(promptText).toContain("## Repository Evidence Gate");
     expect(promptText).toContain("Prefer the lightest successful path");
+    expect(promptText).toContain("if the final user-facing output becomes a durable artifact");
     expect(promptText).toContain("do not narrate obvious mechanics");
     expect(promptText).toContain("reading large files, comparing many files");
     expect(promptText).toContain("gather scoped repository evidence");
@@ -236,8 +240,12 @@ describe("OpenCode agent topology", () => {
     expect(promptText).toContain("openplan/index.jsonl");
     expect(promptText).toContain("bounded_lite_plan_artifact");
     expect(promptText).toContain("Do not write plan artifacts under `.opencode/`");
-    expect(promptText).toContain("Plan Builder may directly write and maintain final plan artifacts");
-    expect(promptText).toContain("deletion/removal must only happen when the user explicitly asks");
+    expect(promptText).toContain("final user-facing durable artifacts");
+    expect(promptText).toContain("final plans, final development documents");
+    expect(promptText).toContain("Do not require the user to additionally say");
+    expect(promptText).toContain("chat-only output");
+    expect(promptText).toContain("temporary discussion");
+    expect(promptText).toContain("If a response is merely an execution result");
   });
 
   it("keeps Plan Builder aligned with the v2.1 plan spec", () => {
@@ -256,7 +264,7 @@ describe("OpenCode agent topology", () => {
     expect(promptText).toContain("[Repo Observed]");
     expect(promptText).toContain("[Inferred]");
     expect(promptText).toContain("basis");
-    expect(promptText).toContain("Final plan artifacts must not contain an `open_questions` section or `[Open Question]` tags");
+    expect(promptText).toContain("A final plan artifact must be executable or reviewable as-is");
     expect(promptText).toContain("Required compact sections");
     expect(promptText).toContain("one-to-two screen plan");
     expect(promptText).toContain("adopted assumptions");
@@ -265,6 +273,7 @@ describe("OpenCode agent topology", () => {
     expect(promptText).toContain("target-state gaps");
     expect(promptText).toContain("never `reviewed` or `M3`");
     expect(promptText).toContain("filenameHint");
+    expect(promptText).toContain("durable artifact candidate");
   });
 
   it("requires Deep Plan Builder to return a filenameHint without owning persistence", () => {
@@ -272,6 +281,9 @@ describe("OpenCode agent topology", () => {
 
     expect(promptText).toContain("filenameHint");
     expect(promptText).toContain("Command Lead owns actual file persistence");
+    expect(promptText).toContain("durable artifact candidate");
+    expect(promptText).not.toContain("recommended_plan_path");
+    expect(promptText).not.toContain("You design, persist, and review the detailed plan artifact");
   });
 
   it("requires every delegating role to use the standard assignment fields", () => {

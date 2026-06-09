@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "roleModels": {},
+  "roleReasoningEffort": {},
+  "taskLeadProfiles": {},
+  "modelPoolPolicy": {
+    "source": "all",
+    "allowCodexBackend": false
+  }
+}

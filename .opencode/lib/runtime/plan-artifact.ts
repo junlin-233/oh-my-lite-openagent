@@ -42,11 +42,8 @@ export interface WritePlanArtifactInput {
   title?: string;
   markdown?: string;
   content?: string;
-  sessionKey: string;
-  sessionStartedAt: string;
   filenameHint?: string;
   generatedBy: string;
-  planId?: string;
   status?: PlanArtifactStatus;
   maturityLevel?: string;
   targetPlanRef?: string;
@@ -54,6 +51,11 @@ export interface WritePlanArtifactInput {
   sourcePlanRef?: string;
   replacesSessionKey?: string;
   replacesPlanRef?: string;
+  systemIdentity?: {
+    sessionKey: string;
+    sessionStartedAt: string;
+    planId?: string;
+  };
   now?: Date;
   configDir?: string;
   testFaults?: {
@@ -194,8 +196,22 @@ export async function writePlanArtifact(input: WritePlanArtifactInput): Promise<
     throw new Error("PLANART_ERR_MISSING_GENERATED_BY: generatedBy is required.");
   }
 
-  const sessionKey = assertSessionKey(input.sessionKey);
-  const sessionStartedAt = toUtcIsoString(input.sessionStartedAt, "sessionStartedAt");
+  const legacyInput = input as unknown as {
+    sessionKey?: unknown;
+    sessionStartedAt?: unknown;
+    planId?: unknown;
+  };
+
+  if (legacyInput.sessionKey !== undefined || legacyInput.sessionStartedAt !== undefined || legacyInput.planId !== undefined) {
+    throw new Error("PLANART_ERR_LEGACY_SYSTEM_IDENTITY_FORBIDDEN: sessionKey/sessionStartedAt/planId must be provided via systemIdentity.");
+  }
+
+  if (!input.systemIdentity) {
+    throw new Error("PLANART_ERR_MISSING_SYSTEM_IDENTITY: systemIdentity is required.");
+  }
+
+  const sessionKey = assertSessionKey(input.systemIdentity.sessionKey);
+  const sessionStartedAt = toUtcIsoString(input.systemIdentity.sessionStartedAt, "sessionStartedAt");
 
   return operation === "create"
     ? writeCreatePlanArtifact(input, sessionKey, sessionStartedAt)
@@ -235,7 +251,7 @@ function writeCreatePlanArtifact(
     sessionKey,
     sessionStartedAt,
     generatedBy: input.generatedBy,
-    ...(input.planId ? { planId: input.planId } : {}),
+    ...(input.systemIdentity?.planId ? { planId: input.systemIdentity.planId } : {}),
     ...(input.maturityLevel ? { maturityLevel: input.maturityLevel } : {}),
     ...(input.now ? { now: input.now } : {}),
     ...(input.configDir ? { configDir: input.configDir } : {}),
@@ -256,6 +272,7 @@ async function persistCreateArtifact(
     sessionKey: string;
     sessionStartedAt: string;
     status: "draft" | "reviewed" | "blocked";
+    planId?: string;
   },
 ): Promise<PlanArtifactWriteResult> {
   const now = input.now ?? new Date();

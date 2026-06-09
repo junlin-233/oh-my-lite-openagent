@@ -63,11 +63,13 @@ describe("openplan plan artifact persistence", () => {
       operation: "create",
       title: options.title ?? "Plan",
       markdown: options.markdown ?? "# Plan",
-      sessionKey: options.sessionKey ?? sessionKey,
-      sessionStartedAt: options.sessionStartedAt ?? sessionStartedAt,
+      systemIdentity: {
+        sessionKey: options.sessionKey ?? sessionKey,
+        sessionStartedAt: options.sessionStartedAt ?? sessionStartedAt,
+        ...(options.planId ? { planId: options.planId } : {}),
+      },
       filenameHint: options.filenameHint ?? "plan.md",
       generatedBy: options.generatedBy ?? "command-lead",
-      ...(options.planId ? { planId: options.planId } : {}),
       ...(options.maturityLevel ? { maturityLevel: options.maturityLevel } : {}),
       ...(options.now ? { now: options.now } : {}),
       ...(options.status ? { status: options.status } : {}),
@@ -102,8 +104,10 @@ describe("openplan plan artifact persistence", () => {
       configDir: options.configDir,
       action: "write",
       operation: "update",
-      sessionKey: options.sessionKey ?? sessionKey,
-      sessionStartedAt: options.sessionStartedAt ?? sessionStartedAt,
+      systemIdentity: {
+        sessionKey: options.sessionKey ?? sessionKey,
+        sessionStartedAt: options.sessionStartedAt ?? sessionStartedAt,
+      },
       generatedBy: options.generatedBy ?? "command-lead",
       ...(options.markdown !== undefined ? { markdown: options.markdown } : {}),
       ...(options.status ? { status: options.status } : {}),
@@ -141,6 +145,27 @@ describe("openplan plan artifact persistence", () => {
     await expect(readFile(path.join(openplanRoot, result.path), "utf8")).resolves.toContain("# Plan");
     expect(await readdir(openplanRoot)).toContain("index.jsonl");
     expect(await readdir(path.join(openplanRoot, sessionKey))).toContain("routing-plan.md");
+  });
+
+  it("writePlanArtifact rejects legacy top-level system identity fields", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "openplan-phase2-"));
+    const configDir = path.join(root, "config-home");
+
+    await withConfigDir(configDir, async () => {
+      await expect(writePlanArtifact({
+        projectRoot: root,
+        configDir,
+        action: "write",
+        operation: "create",
+        title: "Plan",
+        markdown: "# Plan",
+        filenameHint: "plan.md",
+        generatedBy: "command-lead",
+        sessionKey,
+        sessionStartedAt,
+        planId: "z9y8x7w6",
+      } as unknown as Parameters<typeof writePlanArtifact>[0])).rejects.toThrow("PLANART_ERR_LEGACY_SYSTEM_IDENTITY_FORBIDDEN");
+    });
   });
 
   it("cross-session provenance create 成功，且新计划写入当前 session 目录", async () => {
@@ -1037,8 +1062,7 @@ describe("openplan plan artifact persistence", () => {
         configDir,
         action: "write",
         operation: "update",
-        sessionKey,
-        sessionStartedAt,
+        systemIdentity: { sessionKey, sessionStartedAt },
         generatedBy: "command-lead",
         targetPlanRef: created.path,
         status: "superseded",
@@ -1332,11 +1356,23 @@ describe("openplan plan artifact persistence", () => {
         // @ts-expect-error negative guard
         action: "update",
         operation: "update",
-        sessionKey,
-        sessionStartedAt,
+        systemIdentity: { sessionKey, sessionStartedAt },
         generatedBy: "command-lead",
         markdown: "# A",
       })).rejects.toThrow(/action must be write/);
+
+      await expect(writePlanArtifact({
+        projectRoot: root,
+        configDir,
+        action: "write",
+        operation: "create",
+        title: "Legacy identity",
+        markdown: "# x",
+        sessionKey,
+        sessionStartedAt,
+        filenameHint: "legacy.md",
+        generatedBy: "command-lead",
+      } as unknown as Parameters<typeof writePlanArtifact>[0])).rejects.toThrow(/LEGACY_SYSTEM_IDENTITY_FORBIDDEN/);
 
       await createPlan({ root, configDir, filenameHint: "same.md", planId: "aaaabbbb" });
 

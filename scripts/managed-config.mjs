@@ -72,8 +72,6 @@ const PERMISSIVE_BASH_PERMISSION = {
 export const MANAGED_CONFIG = {
   "$schema": "https://opencode.ai/config.json",
   "default_agent": "command-lead",
-<<<<<<< HEAD:scripts/managed-config.mjs
-=======
   "provider": {
     "aiwanwu": {
       "npm": "@ai-sdk/openai-compatible",
@@ -307,7 +305,6 @@ export const MANAGED_CONFIG = {
       }
     ]
   ],
->>>>>>> 097f5c5 (agent-models bug版本，尚待修复):opencode.json
   "command": {
     "agent-models": {
       "description": "Import available OpenCode provider models, preview recommended per-role model/reasoning effort and Task Lead profile assignments, and apply them after user confirmation.",

@@ -1,5 +1,5 @@
 import { createBoundedLitePlugin } from "../../.opencode/plugins/bounded-lite.js";
-import { writePlanArtifact } from "../../.opencode/lib/runtime/plan-artifact.js";
+import { parseFrontmatter, writePlanArtifact } from "../../.opencode/lib/runtime/plan-artifact.js";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -28,7 +28,15 @@ async function execPlanArtifact(
   return raw;
 }
 
+async function readPlanFrontmatter(configDir: string, planPath: string): Promise<Record<string, string>> {
+  const content = await readFile(path.join(configDir, "openplan", ...planPath.split("/")), "utf8");
+  return parseFrontmatter(content);
+}
+
 describe("plugin safety", () => {
+  const otherSessionKey = "20260518-1130-z9y8x7w6";
+  const otherSessionStartedAt = "2026-05-18T03:30:00Z";
+
   it("loads without touching the client during initialization", async () => {
     const client = new Proxy(
       {},
@@ -232,11 +240,8 @@ describe("plugin safety", () => {
           action: "write",
           title: "路由方案设计",
           markdown: "# Plan",
-          sessionKey: "20260518-1030-a1b2c3d4",
-          sessionStartedAt: "2026-05-18T02:30:00Z",
           filenameHint: "routing-plan.md",
           generatedBy: "command-lead",
-          planId: "a1b2c3d4",
           maturityLevel: "M2",
         },
         { directory: process.cwd() },
@@ -256,10 +261,10 @@ describe("plugin safety", () => {
       expect(output.ok).toBe(true);
       expect(output.action).toBe("write");
       expect(output.applied).toBe(true);
-      expect(output.planId).toBe("a1b2c3d4");
-      expect(output.path).toBe("20260518-1030-a1b2c3d4/routing-plan.md");
+      expect(output.planId).toMatch(/^[a-z0-9]{8}$/);
+      expect(output.path).toMatch(/^\d{8}-\d{4}-[a-z0-9]{8}\/routing-plan\.md$/);
       expect(output.indexPath).toBe("openplan/index.jsonl");
-      expect(output.sessionKey).toBe("20260518-1030-a1b2c3d4");
+      expect(output.sessionKey).toMatch(/^\d{8}-\d{4}-[a-z0-9]{8}$/);
       expect(output.bytes).toBeGreaterThan(0);
       expect(output.status).toBe("draft");
       expect(output.operation).toBe("create");
@@ -273,7 +278,94 @@ describe("plugin safety", () => {
     }
   });
 
-  it("rejects missing required fields for create bounded_lite_plan_artifact", async () => {
+  it("auto-injects runtime session metadata for create when the model omits session fields", async () => {
+    const configDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-planart-autosession-"));
+    const previousConfigDir = process.env.OPENCODE_CONFIG_DIR;
+
+    try {
+      process.env.OPENCODE_CONFIG_DIR = configDir;
+      const hooks = createBoundedLitePlugin({ directory: process.cwd() }, { configDir });
+      const output = await execPlanArtifact(
+        hooks,
+        {
+          action: "write",
+          operation: "create",
+          title: "自动注入会话元数据测试",
+          markdown: "# 自动注入会话元数据测试",
+          filenameHint: "auto-session-plan.md",
+          generatedBy: "command-lead",
+        },
+        { directory: process.cwd() },
+      ) as {
+        ok: boolean;
+        path: string;
+        planId: string;
+        sessionKey: string;
+        operation: string;
+      };
+
+      expect(output.ok).toBe(true);
+      expect(output.operation).toBe("create");
+      expect(output.path).toContain("auto-session-plan.md");
+      expect(output.planId).toMatch(/^[a-z0-9]{8}$/);
+      expect(output.sessionKey).toMatch(/^\d{8}-\d{4}-[a-z0-9]{8}$/);
+      expect(output.sessionKey).not.toContain("-0000-");
+
+      const frontmatter = await readPlanFrontmatter(configDir, output.path);
+      expect(frontmatter.session_key).toBe(output.sessionKey);
+      expect(frontmatter.session_started_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(frontmatter.plan_id).toBe(output.planId);
+    } finally {
+      if (previousConfigDir === undefined) {
+        delete process.env.OPENCODE_CONFIG_DIR;
+      } else {
+        process.env.OPENCODE_CONFIG_DIR = previousConfigDir;
+      }
+      await rm(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects model-supplied session metadata and planId", async () => {
+    const configDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-planart-override-session-"));
+    const previousConfigDir = process.env.OPENCODE_CONFIG_DIR;
+
+    try {
+      process.env.OPENCODE_CONFIG_DIR = configDir;
+      const hooks = createBoundedLitePlugin({ directory: process.cwd() }, { configDir });
+      const output = await execPlanArtifact(
+        hooks,
+        {
+          action: "write",
+          operation: "create",
+          title: "覆盖伪造元数据测试",
+          markdown: "# 覆盖伪造元数据测试",
+          filenameHint: "override-metadata-plan.md",
+          generatedBy: "command-lead",
+          planId: "a1b2c3d4",
+          sessionKey: "20260531-0930-a1b2c3d4",
+          sessionStartedAt: "2026-05-31T01:30:00Z",
+        },
+        { directory: process.cwd() },
+      ) as {
+        ok: boolean;
+        code: string;
+        message: string;
+      };
+
+      expect(output.ok).toBe(false);
+      expect(output.code).toBe("PLANART_ERR_LEGACY_SYSTEM_IDENTITY_FORBIDDEN");
+      expect(output.message).toContain("sessionKey");
+    } finally {
+      if (previousConfigDir === undefined) {
+        delete process.env.OPENCODE_CONFIG_DIR;
+      } else {
+        process.env.OPENCODE_CONFIG_DIR = previousConfigDir;
+      }
+      await rm(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects missing generatedBy for create bounded_lite_plan_artifact", async () => {
     const hooks = createBoundedLitePlugin({ directory: process.cwd() });
     const output = await execPlanArtifact(
       hooks,
@@ -282,8 +374,64 @@ describe("plugin safety", () => {
     ) as { ok: boolean; code: string; message: string };
 
     expect(output.ok).toBe(false);
-    expect(output.code).toBe("PLANART_ERR_MISSING_SESSION_KEY");
-    expect(output.message).toContain("sessionKey is required");
+    expect(output.code).toBe("PLANART_ERR_MISSING_GENERATED_BY");
+    expect(output.message).toContain("generatedBy is required");
+  });
+
+  it("declares bounded_lite_plan_artifact action argument in tool schema", async () => {
+    const hooks = await Promise.resolve(
+      createBoundedLitePlugin({
+        directory: process.cwd(),
+      }),
+    );
+
+    const args = hooks.tool?.bounded_lite_plan_artifact?.args as Record<string, unknown> | undefined;
+    expect(args).toBeTruthy();
+    expect(args && "action" in args).toBe(true);
+    expect(args && "sessionKey" in args).toBe(false);
+    expect(args && "sessionStartedAt" in args).toBe(false);
+    expect(args && "planId" in args).toBe(false);
+  });
+
+  it("rejects model-supplied system identity fields for bounded_lite_plan_artifact", async () => {
+    const hooks = createBoundedLitePlugin({ directory: process.cwd() });
+
+    const cases: Array<{ payload: Record<string, unknown>; field: string }> = [
+      { payload: { action: "write", title: "A", markdown: "# A", filenameHint: "a.md", generatedBy: "command-lead", sessionKey: "20260518-1030-a1b2c3d4" }, field: "sessionKey" },
+      { payload: { action: "write", title: "A", markdown: "# A", filenameHint: "a.md", generatedBy: "command-lead", sessionStartedAt: "2026-05-18T02:30:00Z" }, field: "sessionStartedAt" },
+      { payload: { action: "write", title: "A", markdown: "# A", filenameHint: "a.md", generatedBy: "command-lead", planId: "a1b2c3d4" }, field: "planId" },
+    ];
+
+    for (const testCase of cases) {
+      const output = await execPlanArtifact(hooks, testCase.payload, { directory: process.cwd() }) as {
+        ok: boolean;
+        code: string;
+        message: string;
+      };
+
+      expect(output.ok).toBe(false);
+      expect(output.code).toBe("PLANART_ERR_LEGACY_SYSTEM_IDENTITY_FORBIDDEN");
+      expect(output.message).toContain(testCase.field);
+    }
+  });
+
+  it("returns missing action validation error with expected actions for empty plan-artifact payload", async () => {
+    const hooks = createBoundedLitePlugin({ directory: process.cwd() });
+    const output = await execPlanArtifact(
+      hooks,
+      {} as Record<string, unknown>,
+      { directory: process.cwd() },
+    ) as {
+      ok: boolean;
+      code: string;
+      message: string;
+      expected?: { action?: string[] };
+    };
+
+    expect(output.ok).toBe(false);
+    expect(output.code).toBe("PLANART_ERR_MISSING_ACTION");
+    expect(output.message).toContain("requires action");
+    expect(output.expected?.action).toEqual(["write", "rebuild"]);
   });
 
   it("rejects out-of-scope fields and non-write actions for bounded_lite_plan_artifact", async () => {
@@ -295,8 +443,6 @@ describe("plugin safety", () => {
         action: "write",
         title: "A",
         markdown: "# A",
-        sessionKey: "20260518-1030-a1b2c3d4",
-        sessionStartedAt: "2026-05-18T02:30:00Z",
         filenameHint: "a.md",
         generatedBy: "command-lead",
         unsupportedField: "x",
@@ -310,8 +456,6 @@ describe("plugin safety", () => {
         action: "noop",
         operation: "update",
         markdown: "# A",
-        sessionKey: "20260518-1030-a1b2c3d4",
-        sessionStartedAt: "2026-05-18T02:30:00Z",
         generatedBy: "command-lead",
       },
       { directory: process.cwd() },
@@ -323,8 +467,6 @@ describe("plugin safety", () => {
         action: "write",
         title: "A",
         markdown: "# A",
-        sessionKey: "20260518-1030-a1b2c3d4",
-        sessionStartedAt: "2026-05-18T02:30:00Z",
         filenameHint: "a.txt",
         generatedBy: "command-lead",
       },
@@ -354,11 +496,8 @@ describe("plugin safety", () => {
           operation: "create",
           title: "路由方案设计",
           markdown: "# Plan",
-          sessionKey: "20260518-1030-a1b2c3d4",
-          sessionStartedAt: "2026-05-18T02:30:00Z",
           filenameHint: "routing-plan.md",
           generatedBy: "command-lead",
-          planId: "a1b2c3d4",
         },
         { directory: process.cwd() },
       ) as { path: string };
@@ -371,8 +510,6 @@ describe("plugin safety", () => {
           targetPlanRef: created.path,
           markdown: "# Plan\nupdated",
           status: "reviewed",
-          sessionKey: "20260518-1030-a1b2c3d4",
-          sessionStartedAt: "2026-05-18T02:30:00Z",
           generatedBy: "command-lead",
         },
         { directory: process.cwd() },
@@ -401,6 +538,62 @@ describe("plugin safety", () => {
     }
   });
 
+  it("supports update from a fresh plugin instance by restoring persisted session context", async () => {
+    const configDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-planart-fresh-instance-update-"));
+    const previousConfigDir = process.env.OPENCODE_CONFIG_DIR;
+
+    try {
+      process.env.OPENCODE_CONFIG_DIR = configDir;
+      const hooksA = createBoundedLitePlugin({ directory: process.cwd() }, { configDir });
+      const created = await execPlanArtifact(
+        hooksA,
+        {
+          action: "write",
+          operation: "create",
+          title: "实例 A 创建",
+          markdown: "# Created by A",
+          filenameHint: "fresh-update.md",
+          generatedBy: "command-lead",
+        },
+        { directory: process.cwd() },
+      ) as { ok: boolean; path: string; sessionKey: string };
+
+      expect(created.ok).toBe(true);
+
+      const hooksB = createBoundedLitePlugin({ directory: process.cwd() }, { configDir });
+      const updated = await execPlanArtifact(
+        hooksB,
+        {
+          action: "write",
+          operation: "update",
+          targetPlanRef: created.path,
+          markdown: "# Updated by B",
+          status: "reviewed",
+          generatedBy: "command-lead",
+        },
+        { directory: process.cwd() },
+      ) as { ok: boolean; path: string; status: string; operation: string; sessionKey: string };
+
+      expect(updated.ok).toBe(true);
+      expect(updated.path).toBe(created.path);
+      expect(updated.status).toBe("reviewed");
+      expect(updated.operation).toBe("update");
+      expect(updated.sessionKey).toBe(created.sessionKey);
+
+      const frontmatter = await readPlanFrontmatter(configDir, created.path);
+      expect(frontmatter.session_key).toBe(created.sessionKey);
+      expect(frontmatter.operation).toBe("update");
+      expect(frontmatter.status).toBe("reviewed");
+    } finally {
+      if (previousConfigDir === undefined) {
+        delete process.env.OPENCODE_CONFIG_DIR;
+      } else {
+        process.env.OPENCODE_CONFIG_DIR = previousConfigDir;
+      }
+      await rm(configDir, { recursive: true, force: true });
+    }
+  });
+
   it("supports cross-session provenance create for bounded_lite_plan_artifact", async () => {
     const configDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-planart-provenance-"));
     const previousConfigDir = process.env.OPENCODE_CONFIG_DIR;
@@ -409,21 +602,21 @@ describe("plugin safety", () => {
       process.env.OPENCODE_CONFIG_DIR = configDir;
       const hooks = createBoundedLitePlugin({ directory: process.cwd() }, { configDir });
 
-      const source = await execPlanArtifact(
-        hooks,
-        {
-          action: "write",
-          operation: "create",
-          title: "Source",
-          markdown: "# Source",
+      const source = await writePlanArtifact({
+        projectRoot: process.cwd(),
+        configDir,
+        action: "write",
+        operation: "create",
+        title: "Source",
+        markdown: "# Source",
+        systemIdentity: {
           sessionKey: "20260518-1130-z9y8x7w6",
           sessionStartedAt: "2026-05-18T03:30:00Z",
-          filenameHint: "source.md",
-          generatedBy: "command-lead",
           planId: "a1b2c3d4",
         },
-        { directory: process.cwd() },
-      ) as { path: string };
+        filenameHint: "source.md",
+        generatedBy: "command-lead",
+      });
 
       const derived = await execPlanArtifact(
         hooks,
@@ -432,20 +625,16 @@ describe("plugin safety", () => {
           operation: "create",
           title: "Derived",
           markdown: "# Derived",
-          sessionKey: "20260518-1030-a1b2c3d4",
-          sessionStartedAt: "2026-05-18T02:30:00Z",
           filenameHint: "derived.md",
           generatedBy: "command-lead",
-          planId: "b1c2d3e4",
           sourcePlanRef: source.path,
-          sourceSessionKey: "20260518-1130-z9y8x7w6",
         },
         { directory: process.cwd() },
       ) as { ok: boolean; path: string; operation: string };
 
       expect(derived.ok).toBe(true);
       expect(derived.operation).toBe("create");
-      expect(derived.path).toBe("20260518-1030-a1b2c3d4/derived.md");
+      expect(derived.path).toMatch(/^\d{8}-\d{4}-[a-z0-9]{8}\/derived\.md$/);
     } finally {
       if (previousConfigDir === undefined) {
         delete process.env.OPENCODE_CONFIG_DIR;
@@ -464,21 +653,21 @@ describe("plugin safety", () => {
       process.env.OPENCODE_CONFIG_DIR = configDir;
       const hooks = createBoundedLitePlugin({ directory: process.cwd() }, { configDir });
 
-      const oldPlan = await execPlanArtifact(
-        hooks,
-        {
-          action: "write",
-          operation: "create",
-          title: "Old",
-          markdown: "# Old",
+      const oldPlan = await writePlanArtifact({
+        projectRoot: process.cwd(),
+        configDir,
+        action: "write",
+        operation: "create",
+        title: "Old",
+        markdown: "# Old",
+        systemIdentity: {
           sessionKey: "20260518-1130-z9y8x7w6",
           sessionStartedAt: "2026-05-18T03:30:00Z",
-          filenameHint: "old.md",
-          generatedBy: "command-lead",
           planId: "a1b2c3d4",
         },
-        { directory: process.cwd() },
-      ) as { path: string };
+        filenameHint: "old.md",
+        generatedBy: "command-lead",
+      });
 
       const created = await execPlanArtifact(
         hooks,
@@ -487,20 +676,16 @@ describe("plugin safety", () => {
           operation: "create",
           title: "Replacement",
           markdown: "# Replacement",
-          sessionKey: "20260518-1030-a1b2c3d4",
-          sessionStartedAt: "2026-05-18T02:30:00Z",
           filenameHint: "replacement.md",
           generatedBy: "command-lead",
-          planId: "b1c2d3e4",
           replacesPlanRef: oldPlan.path,
-          replacesSessionKey: "20260518-1130-z9y8x7w6",
         },
         { directory: process.cwd() },
       ) as { ok: boolean; path: string; operation: string };
 
       expect(created.ok).toBe(true);
       expect(created.operation).toBe("create");
-      expect(created.path).toBe("20260518-1030-a1b2c3d4/replacement.md");
+      expect(created.path).toMatch(/^\d{8}-\d{4}-[a-z0-9]{8}\/replacement\.md$/);
     } finally {
       if (previousConfigDir === undefined) {
         delete process.env.OPENCODE_CONFIG_DIR;
@@ -521,11 +706,8 @@ describe("plugin safety", () => {
         operation: "create",
         title: "Derived",
         markdown: "# Derived",
-        sessionKey: "20260518-1030-a1b2c3d4",
-        sessionStartedAt: "2026-05-18T02:30:00Z",
         filenameHint: "derived.md",
         generatedBy: "command-lead",
-        planId: "b1c2d3e4",
         sourceSessionKey: "20260518-1130-z9y8x7w6",
       },
       { directory: process.cwd() },
@@ -540,62 +722,54 @@ describe("plugin safety", () => {
 
     const missingPayload = await execPlanArtifact(
       hooks,
-      {
-        action: "write",
-        operation: "update",
-        sessionKey: "20260518-1030-a1b2c3d4",
-        sessionStartedAt: "2026-05-18T02:30:00Z",
-        generatedBy: "command-lead",
-      },
-      { directory: process.cwd() },
+        {
+          action: "write",
+          operation: "update",
+          generatedBy: "command-lead",
+        },
+        { directory: process.cwd() },
     ) as { ok: boolean; code: string; message: string };
 
     const crossSession = await execPlanArtifact(
       hooks,
-      {
-        action: "write",
-        operation: "update",
-        targetPlanRef: "20260518-1130-z9y8x7w6/plan.md",
-        markdown: "# x",
-        sessionKey: "20260518-1030-a1b2c3d4",
-        sessionStartedAt: "2026-05-18T02:30:00Z",
-        generatedBy: "command-lead",
-      },
-      { directory: process.cwd() },
+        {
+          action: "write",
+          operation: "update",
+          targetPlanRef: "20260518-1130-z9y8x7w6/plan.md",
+          markdown: "# x",
+          generatedBy: "command-lead",
+        },
+        { directory: process.cwd() },
     ) as { ok: boolean; code: string; message: string };
 
     const updateWithSource = await execPlanArtifact(
       hooks,
-      {
-        action: "write",
-        operation: "update",
-        markdown: "# x",
-        sourcePlanRef: "20260518-1130-z9y8x7w6/plan.md",
-        sessionKey: "20260518-1030-a1b2c3d4",
-        sessionStartedAt: "2026-05-18T02:30:00Z",
-        generatedBy: "command-lead",
-      },
-      { directory: process.cwd() },
+        {
+          action: "write",
+          operation: "update",
+          markdown: "# x",
+          sourcePlanRef: "20260518-1130-z9y8x7w6/plan.md",
+          generatedBy: "command-lead",
+        },
+        { directory: process.cwd() },
     ) as { ok: boolean; code: string; message: string };
 
     const updateWithReplacement = await execPlanArtifact(
       hooks,
-      {
-        action: "write",
-        operation: "update",
-        markdown: "# x",
-        replacesPlanRef: "20260518-1130-z9y8x7w6/plan.md",
-        sessionKey: "20260518-1030-a1b2c3d4",
-        sessionStartedAt: "2026-05-18T02:30:00Z",
-        generatedBy: "command-lead",
-      },
-      { directory: process.cwd() },
+        {
+          action: "write",
+          operation: "update",
+          markdown: "# x",
+          replacesPlanRef: "20260518-1130-z9y8x7w6/plan.md",
+          generatedBy: "command-lead",
+        },
+        { directory: process.cwd() },
     ) as { ok: boolean; code: string; message: string };
 
     expect(missingPayload.ok).toBe(false);
     expect(missingPayload.code).toBe("PLANART_ERR_MISSING_UPDATE_PAYLOAD");
     expect(crossSession.ok).toBe(false);
-    expect(crossSession.code).toBe("PLANART_ERR_CROSS_SESSION_UPDATE");
+    expect(crossSession.code).toBe("PLANART_ERR_TARGET_NOT_FOUND");
     expect(updateWithSource.ok).toBe(false);
     expect(updateWithSource.code).toBe("PLANART_ERR_UPDATE_SOURCE_FORBIDDEN");
     expect(updateWithReplacement.ok).toBe(false);
@@ -617,11 +791,8 @@ describe("plugin safety", () => {
           operation: "create",
           title: "路由方案设计",
           markdown: "# Plan",
-          sessionKey: "20260518-1030-a1b2c3d4",
-          sessionStartedAt: "2026-05-18T02:30:00Z",
           filenameHint: "routing-plan.md",
           generatedBy: "command-lead",
-          planId: "a1b2c3d4",
         },
         { directory: process.cwd() },
       );
@@ -658,20 +829,75 @@ describe("plugin safety", () => {
     }
   });
 
+  it("tolerates operation field for action=rebuild to stay wrapper-compatible", async () => {
+    const configDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-planart-rebuild-operation-"));
+    const previousConfigDir = process.env.OPENCODE_CONFIG_DIR;
+
+    try {
+      process.env.OPENCODE_CONFIG_DIR = configDir;
+      const hooks = createBoundedLitePlugin({ directory: process.cwd() }, { configDir });
+
+      await execPlanArtifact(
+        hooks,
+        {
+          action: "write",
+          operation: "create",
+          title: "seed",
+          markdown: "# seed",
+          filenameHint: "seed.md",
+          generatedBy: "command-lead",
+        },
+        { directory: process.cwd() },
+      );
+
+      await writeFile(path.join(configDir, "openplan", "index.jsonl"), "{broken\n");
+      const rebuilt = await execPlanArtifact(
+        hooks,
+        { action: "rebuild", operation: "update", reason: "wrapper compatibility" },
+        { directory: process.cwd() },
+      ) as {
+        ok: boolean;
+        action: string;
+        applied: boolean;
+        indexPath: string;
+        scannedFileCount: number;
+        rebuiltRecordCount: number;
+        mode: string;
+      };
+
+      expect(rebuilt.ok).toBe(true);
+      expect(rebuilt.action).toBe("rebuild");
+      expect(rebuilt.applied).toBe(true);
+      expect(rebuilt.indexPath).toBe("openplan/index.jsonl");
+      expect(rebuilt.scannedFileCount).toBe(1);
+      expect(rebuilt.rebuiltRecordCount).toBe(1);
+      expect(rebuilt.mode).toBe("manual-rebuild");
+    } finally {
+      if (previousConfigDir === undefined) {
+        delete process.env.OPENCODE_CONFIG_DIR;
+      } else {
+        process.env.OPENCODE_CONFIG_DIR = previousConfigDir;
+      }
+      await rm(configDir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects write-only fields for action=rebuild", async () => {
     const hooks = createBoundedLitePlugin({ directory: process.cwd() });
 
     const cases: Array<{ payload: Record<string, unknown>; code: string }> = [
       { payload: { action: "rebuild", filenameHint: "a.md" }, code: "PLANART_ERR_REBUILD_WRITE_FIELDS_FORBIDDEN" },
       { payload: { action: "rebuild", filenameHint: "" }, code: "PLANART_ERR_REBUILD_WRITE_FIELDS_FORBIDDEN" },
-      { payload: { action: "rebuild", planId: "a1b2c3d4" }, code: "PLANART_ERR_REBUILD_WRITE_FIELDS_FORBIDDEN" },
-      { payload: { action: "rebuild", planId: null }, code: "PLANART_ERR_REBUILD_WRITE_FIELDS_FORBIDDEN" },
+      { payload: { action: "rebuild", sessionKey: "20260518-1030-a1b2c3d4" }, code: "PLANART_ERR_LEGACY_SYSTEM_IDENTITY_FORBIDDEN" },
+      { payload: { action: "rebuild", sessionStartedAt: "2026-05-18T02:30:00Z" }, code: "PLANART_ERR_LEGACY_SYSTEM_IDENTITY_FORBIDDEN" },
+      { payload: { action: "rebuild", planId: "a1b2c3d4" }, code: "PLANART_ERR_LEGACY_SYSTEM_IDENTITY_FORBIDDEN" },
+      { payload: { action: "rebuild", planId: null }, code: "PLANART_ERR_LEGACY_SYSTEM_IDENTITY_FORBIDDEN" },
       { payload: { action: "rebuild", status: "draft" }, code: "PLANART_ERR_REBUILD_WRITE_FIELDS_FORBIDDEN" },
       { payload: { action: "rebuild", status: 0 }, code: "PLANART_ERR_REBUILD_WRITE_FIELDS_FORBIDDEN" },
       { payload: { action: "rebuild", maturityLevel: "M2" }, code: "PLANART_ERR_REBUILD_WRITE_FIELDS_FORBIDDEN" },
       { payload: { action: "rebuild", maturityLevel: false }, code: "PLANART_ERR_REBUILD_WRITE_FIELDS_FORBIDDEN" },
       { payload: { action: "rebuild", filename_hint: {} }, code: "PLANART_ERR_REBUILD_WRITE_FIELDS_FORBIDDEN" },
-      { payload: { action: "rebuild", plan_id: [] }, code: "PLANART_ERR_REBUILD_WRITE_FIELDS_FORBIDDEN" },
+      { payload: { action: "rebuild", plan_id: [] }, code: "PLANART_ERR_LEGACY_SYSTEM_IDENTITY_FORBIDDEN" },
     ];
 
     for (const testCase of cases) {
@@ -699,11 +925,13 @@ describe("plugin safety", () => {
         operation: "create",
         title: "seed",
         markdown: "# seed",
-        sessionKey: "20260518-1030-a1b2c3d4",
-        sessionStartedAt: "2026-05-18T02:30:00Z",
+        systemIdentity: {
+          sessionKey: "20260518-1030-a1b2c3d4",
+          sessionStartedAt: "2026-05-18T02:30:00Z",
+          planId: "a1b2c3d4",
+        },
         filenameHint: "seed.md",
         generatedBy: "command-lead",
-        planId: "a1b2c3d4",
       });
       await rm(path.join(configDir, "openplan", "index.jsonl"), { force: true });
 
@@ -716,19 +944,17 @@ describe("plugin safety", () => {
           operation: "create",
           title: "next",
           markdown: "# next",
-          sessionKey: "20260518-1030-a1b2c3d4",
-          sessionStartedAt: "2026-05-18T02:30:00Z",
           filenameHint: "next.md",
           generatedBy: "command-lead",
-          planId: "b1c2d3e4",
         },
         { directory: process.cwd() },
-      ) as { ok: boolean; action: string; applied: boolean };
+      ) as { ok: boolean; action: string; applied: boolean; path: string };
 
       expect(output.ok).toBe(true);
+      expect(output.path).toMatch(/^\d{8}-\d{4}-[a-z0-9]{8}\/next\.md$/);
       const index = await readFile(path.join(configDir, "openplan", "index.jsonl"), "utf8");
       expect(index).toContain('"path":"20260518-1030-a1b2c3d4/seed.md"');
-      expect(index).toContain('"path":"20260518-1030-a1b2c3d4/next.md"');
+      expect(index).toContain(output.path);
     } finally {
       if (previousConfigDir === undefined) {
         delete process.env.OPENCODE_CONFIG_DIR;
@@ -754,14 +980,11 @@ describe("plugin safety", () => {
           operation: "create",
           title: "seed",
           markdown: "# seed",
-          sessionKey: "20260518-1030-a1b2c3d4",
-          sessionStartedAt: "2026-05-18T02:30:00Z",
           filenameHint: "seed.md",
           generatedBy: "command-lead",
-          planId: "a1b2c3d4",
         },
         { directory: process.cwd() },
-      ) as { ok: boolean };
+      ) as { ok: boolean; path: string };
 
       expect(first.ok).toBe(true);
       await writeFile(path.join(configDir, "openplan", "index.jsonl"), "{broken\n");
@@ -773,11 +996,8 @@ describe("plugin safety", () => {
           operation: "create",
           title: "after",
           markdown: "# after",
-          sessionKey: "20260518-1030-a1b2c3d4",
-          sessionStartedAt: "2026-05-18T02:30:00Z",
           filenameHint: "after.md",
           generatedBy: "command-lead",
-          planId: "b1c2d3e4",
         },
         { directory: process.cwd() },
       ) as { ok: boolean; applied: boolean; rebuildTriggered: boolean };
@@ -808,11 +1028,13 @@ describe("plugin safety", () => {
         operation: "create",
         title: "seed",
         markdown: "# seed",
-        sessionKey: "20260518-1030-a1b2c3d4",
-        sessionStartedAt: "2026-05-18T02:30:00Z",
+        systemIdentity: {
+          sessionKey: "20260518-1030-a1b2c3d4",
+          sessionStartedAt: "2026-05-18T02:30:00Z",
+          planId: "a1b2c3d4",
+        },
         filenameHint: "seed.md",
         generatedBy: "command-lead",
-        planId: "a1b2c3d4",
       });
       await writeFile(path.join(configDir, "openplan", "index.jsonl"), "{broken\n");
 
@@ -824,17 +1046,16 @@ describe("plugin safety", () => {
           operation: "create",
           title: "next",
           markdown: "# next",
-          sessionKey: "20260518-1030-a1b2c3d4",
-          sessionStartedAt: "2026-05-18T02:30:00Z",
           filenameHint: "next.md",
           generatedBy: "command-lead",
-          planId: "b1c2d3e4",
         },
         { directory: process.cwd() },
-      ) as { ok: boolean };
+      ) as { ok: boolean; path: string };
 
       expect(output.ok).toBe(true);
-      await expect(readFile(path.join(configDir, "openplan", "index.jsonl"), "utf8")).resolves.toContain('"path":"20260518-1030-a1b2c3d4/next.md"');
+      expect(output.path).toMatch(/^\d{8}-\d{4}-[a-z0-9]{8}\/next\.md$/);
+      const index = await readFile(path.join(configDir, "openplan", "index.jsonl"), "utf8");
+      expect(index).toContain(output.path);
     } finally {
       if (previousConfigDir === undefined) {
         delete process.env.OPENCODE_CONFIG_DIR;
@@ -862,11 +1083,8 @@ describe("plugin safety", () => {
           operation: "create",
           title: "after",
           markdown: "# after",
-          sessionKey: "20260518-1030-a1b2c3d4",
-          sessionStartedAt: "2026-05-18T02:30:00Z",
           filenameHint: "after.md",
           generatedBy: "command-lead",
-          planId: "b1c2d3e4",
         },
         { directory: process.cwd() },
       ) as { ok: boolean; code: string; message: string };
@@ -909,11 +1127,8 @@ describe("plugin safety", () => {
           operation: "create",
           title: "after",
           markdown: "# after",
-          sessionKey: "20260518-1030-a1b2c3d4",
-          sessionStartedAt: "2026-05-18T02:30:00Z",
           filenameHint: "after.md",
           generatedBy: "command-lead",
-          planId: "b1c2d3e4",
         },
         { directory: process.cwd() },
       ) as { ok: boolean; message: string };
@@ -926,11 +1141,13 @@ describe("plugin safety", () => {
         operation: "create",
         title: "fixed",
         markdown: "# fixed",
-        sessionKey: "20260518-1030-a1b2c3d4",
-        sessionStartedAt: "2026-05-18T02:30:00Z",
+        systemIdentity: {
+          sessionKey: "20260518-1030-a1b2c3d4",
+          sessionStartedAt: "2026-05-18T02:30:00Z",
+          planId: "c1d2e3f4",
+        },
         filenameHint: "fixed.md",
         generatedBy: "command-lead",
-        planId: "c1d2e3f4",
       }).catch(() => undefined);
       await rm(badPlanPath, { force: true });
 
@@ -941,11 +1158,8 @@ describe("plugin safety", () => {
           operation: "create",
           title: "after-2",
           markdown: "# after-2",
-          sessionKey: "20260518-1030-a1b2c3d4",
-          sessionStartedAt: "2026-05-18T02:30:00Z",
           filenameHint: "after-2.md",
           generatedBy: "command-lead",
-          planId: "d1e2f3a4",
         },
         { directory: process.cwd() },
       ) as { ok: boolean; message: string };
@@ -1424,21 +1638,6 @@ describe("plugin safety", () => {
       }
       await rm(configDir, { recursive: true, force: true });
     }
-  });
-
-  it("declares bounded_lite_model_config action argument in tool schema", async () => {
-    const hooks = await Promise.resolve(
-      createBoundedLitePlugin({
-        directory: process.cwd(),
-      }),
-    );
-
-    const args = hooks.tool?.bounded_lite_model_config?.args as Record<string, unknown> | undefined;
-    expect(args).toBeTruthy();
-    expect(args?.type).toBe("object");
-    expect(Array.isArray(args?.required) && args.required.includes("action")).toBe(true);
-    expect(typeof args?.properties).toBe("object");
-    expect(Boolean((args?.properties as Record<string, unknown> | undefined)?.action)).toBe(true);
   });
 
   it("blocks task delegation for /agent-models in tool.execute.before", async () => {
