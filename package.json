@@ -12,6 +12,7 @@
     ".opencode/plugins/",
     ".opencode/lib/",
     "scripts/install.mjs",
+    "scripts/install-paths.mjs",
     "scripts/managed-config.mjs",
     "README.md",
     "README.zh-CN.md",

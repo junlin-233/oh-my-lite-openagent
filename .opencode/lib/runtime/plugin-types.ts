@@ -31,25 +31,25 @@ export interface ToolExecutionAfter {
 export interface ToolDefinition {
   description: string;
   args?: unknown;
-  execute: (args: Record<string, unknown>, context: PluginInput) => Promise<unknown> | unknown;
+  execute: (args: Record<string, unknown>, context: PluginInput) => Promise<unknown>;
 }
 
 export interface PluginHooks {
-  config?: (input: unknown) => Promise<void> | void;
-  event?: (input: { event: { name: string; payload?: unknown } }) => Promise<void> | void;
+  config?: (input: unknown) => void | Promise<void>;
+  event?: (input: { event: { name: string; payload?: unknown } }) => void | Promise<void>;
   tool?: Record<string, ToolDefinition>;
   "permission.ask"?: (
     input: PermissionRequest,
     output: { status: PermissionStatus },
-  ) => Promise<void> | void;
+  ) => void | Promise<void>;
   "tool.execute.before"?: (
     input: ToolExecutionBefore,
     output: { args: Record<string, unknown> },
-  ) => Promise<void> | void;
+  ) => void | Promise<void>;
   "tool.execute.after"?: (
     input: ToolExecutionAfter,
     output: { output: unknown },
-  ) => Promise<void> | void;
+  ) => void | Promise<void>;
 }
 
 export interface RouteToolArgs {
@@ -59,4 +59,4 @@ export interface RouteToolArgs {
 export type PluginFactory = (
   input: PluginInput,
   options?: Record<string, unknown>,
-) => Promise<PluginHooks> | PluginHooks;
+) => Promise<PluginHooks>;

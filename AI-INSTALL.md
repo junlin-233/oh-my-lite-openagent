@@ -12,11 +12,11 @@ https://github.com/junlin-233/oh-my-lite-openagent
 
 Make Oh My Lite OpenAgent work globally for OpenCode with the best model for each role.
 
-After installation, the user should be able to run `opencode` from any directory and get `command-lead` as the default agent with the plugin tools loaded, and each role should have an appropriate model assigned.
+After installation, the user should be able to run `opencode` from any directory and get `command-lead` as the default agent with the plugin tools loaded, `/go` and `/agent-models` registered as managed commands, and each role should have an appropriate model assigned.
 
 ## Step 1: Install
 
-This repository does not ship a root `opencode.json`. The installer merges only the plugin-managed config fragment from `scripts/managed-config.mjs`; user-specific provider, model, API key, unrelated plugin, and custom agent settings must remain in the user's own OpenCode config.
+This repository does not ship a root `opencode.json`. The installer merges only the plugin-managed config fragment from `scripts/managed-config.mjs`; user-specific provider, model, API key, unrelated plugin, and custom agent settings must remain in the user's own OpenCode config. Managed role definitions are generated as markdown files under `<configDir>/agents/*.md`; stale managed role definitions are removed from `opencode.json`, while custom agents are preserved.
 
 If installing from npm or `npx`, warn the user that the downloaded npm package may lag behind the latest repository `main` branch. For the newest documented behavior, prefer the source install below or confirm the published version with `npm view oh-my-lite-openagent version`.
 
@@ -27,6 +27,7 @@ Before running the installer, do this preflight check in the target OpenCode con
 3. If both exist, `opencode.json` is the active merge target and `opencode.jsonc` is left untouched.
 4. If only `opencode.jsonc` exists, the installer must merge into `opencode.jsonc` and must not create a new `opencode.json`.
 5. If neither exists, the installer may create `opencode.json`.
+6. Backups are written only for target files that already exist; do not expect empty `.bak` files for first-time generated files.
 
 ```bash
 git clone https://github.com/junlin-233/oh-my-lite-openagent.git
@@ -111,8 +112,11 @@ Confirm:
 - `command-lead` tools include `bounded_lite_runtime_profile`.
 - `command-lead` tools include `bounded_lite_model_config`.
 - `/agent-models` is registered in OpenCode commands.
+- `/go` is registered in OpenCode commands and targets `command-lead`.
 - `build` mode is `subagent`.
 - `plan` mode is `subagent`.
+
+The managed plugin hooks and tool handlers are async-compatible. JSON-shaped tool results, such as route resolution or runtime profile output, are returned as formatted JSON strings for stable provider/tool transport behavior.
 
 Then check model assignments:
 
@@ -129,11 +133,12 @@ Each role should have a `model` field with the best available `provider/model` a
 - Preserve API keys and never print them.
 - Preserve unrelated plugins.
 - Preserve custom agents.
+- Remove stale Oh My Lite managed role definitions from `opencode.json`; the active role definitions live in generated markdown agent files under `<configDir>/agents/*.md`.
 - Preserve the existing OpenCode config filename when possible: update `opencode.jsonc` when it is the only existing config file.
 - Do not overwrite the whole OpenCode config.
 - Do not silently create `opencode.json` when the user already has only `opencode.jsonc`.
 - Do not delete user files.
-- Role bash permissions default to `allow` for ordinary commands and `ask` for dangerous or sensitive commands such as destructive file operations, privileged system commands, git history/remote mutations, npm publishing/removal/versioning, real installer writes, and download-then-execute patterns. The disabled built-in `build` and `plan` overrides remain fully denied.
+- Role bash permissions default to `allow` for ordinary commands and `ask` for dangerous or sensitive commands such as destructive file operations, privileged system commands, git history/remote mutations, npm publishing/removal/versioning, real installer writes, and download-then-execute patterns. This policy lives in global `permission.bash`: if the user has a custom `permission` object without `bash`, backfill the managed bash policy while preserving the user's other permission settings; if the user already has `permission.bash`, preserve it. The disabled built-in `build` and `plan` overrides remain fully denied.
 
 ## If Something Fails
 
@@ -180,9 +185,20 @@ Inside OpenCode, type `/agent-models`. The command-lead agent will call `bounded
 - **`action=list`**: Show every role's current model, Task Lead profile model, and all discovered models.
 - **`action=apply`**: Manually assign specific imported models. Example: `{ action: "apply", assignments: { "command-lead": "openai/gpt-5.4" }, taskLeadProfileAssignments: { "code": "opencode/claude-sonnet-4-6" } }`
 
+## How /go Works
+
+Inside OpenCode, type `/go <goal>`. The command sends `$ARGUMENTS` to `command-lead` as a non-interactive Go Protocol workflow. Command Lead should infer practical acceptance criteria from the goal and repository conventions, gather scoped evidence, choose the lightest safe strategy, implement or delegate bounded work, verify the result, and continue until acceptance passes or a hard blocker is reached.
+
+`/go` is a workflow command, not a new mode or agent. It must not commit, push, publish, perform destructive actions, or write external/user-local OpenCode config unless the user explicitly requests and authorizes that action.
+
+## Planning Questions
+
+The visible decision-making roles (`command-lead`, `plan-builder`, and `deep-plan-builder`) may use OpenCode's `Question tool` for bounded blocking choices. Plan Builder and Deep Plan Builder should present 2-5 concrete options, include a recommended option when evidence supports one, include `Custom / other` when user-supplied input is valid, and record user-confirmed decisions in the plan artifact when they affect scope, acceptance, or strategy.
+
 ## Success Condition
 
 Installation and model configuration is complete when:
 
 1. `opencode debug agent command-lead` shows `native: false` and all `bounded_lite_*` tools are present.
-2. Each role has a `model` field in `opencode debug config` matching one of the user's available provider models.
+2. `/go` and `/agent-models` are available as OpenCode commands.
+3. Each role has a `model` field in `opencode debug config` matching one of the user's available provider models.

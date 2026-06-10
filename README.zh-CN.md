@@ -15,10 +15,12 @@
 - `task-lead`、`explore`、`librarian`、`plan-review`、`result-review`：隐藏的受限 subagent。
 - Task Lead profiles（`quick`、`code`、`research`、`writing`、`visual`、`deep`、`risk-high`）会把计划属性映射为派发元数据和模型推荐，但不会新增真实 agent。
 - 每个角色都参照 OpenCode 的任务追踪风格维护自己的本地 todo 列表，但 todo 不替代 artifact 或 canonical state。
+- 可见决策角色（`command-lead`、`plan-builder`、`deep-plan-builder`）可以用 OpenCode 的 `Question tool` 呈现有边界的阻塞选择；隐藏内部角色不进入用户可见的决策循环。
+- `plan-builder` 和 `deep-plan-builder` 带有 Decision Selector Discipline，会把阻塞选择收敛成 2-5 个具体选项；当允许用户自定义输入时保留 `Custom / other`。
 - `result-review` 是用户可选择调用的可选审查，只审查 Command Lead 的执行摘要/最终整合结果，不审查 Task Lead 子任务返回。
 - 有委派权的角色派遣任务时使用显式模板：`TASK`、`EXPECTED OUTCOME`、`ROLE`、`SCOPE`、`UPSTREAM EVIDENCE`、`REQUIRED TOOLS`、`MUST DO`、`MUST NOT DO`、`CONTEXT`、`DELIVERABLE FORMAT`、`FAILURE RETURN`。
 - 持久化计划 artifact 会写入 `.liteagent/plans/`，并追加索引 `.liteagent/plan-index.jsonl`。
-- 兼容 provider 的插件工具：`bounded_lite_route`、`bounded_lite_plan_dag`、`bounded_lite_plan_readiness`、`bounded_lite_plan_artifact`、`bounded_lite_background`、`bounded_lite_runtime_profile`、`bounded_lite_model_config`。
+- 兼容 provider 的异步插件工具：`bounded_lite_route`、`bounded_lite_plan_dag`、`bounded_lite_plan_readiness`、`bounded_lite_plan_artifact`、`bounded_lite_background`、`bounded_lite_runtime_profile`、`bounded_lite_model_config`。
 - OpenCode 原生 `build` 和 `plan` 模式会被隐藏并禁用。
 - 全局安装器会保留你已有的 model、provider、API key、插件和自定义 agent。
 
@@ -40,7 +42,7 @@ AI 安装说明放在 [`AI-INSTALL.md`](./AI-INSTALL.md)。
 
 ### 安装
 
-通过 npm 安装（发布到 npm 后）：
+通过 npm 安装：
 
 ```bash
 npm install -g oh-my-lite-openagent
@@ -104,9 +106,13 @@ agents/*.md
 oh-my-lite-openagent.json
 ```
 
-然后只将 `scripts/managed-config.mjs` 中的插件/命令启动片段合并到 OpenCode 全局配置中。角色定义会生成到 OpenCode 原生 markdown agent 文件 `<configDir>/agents/*.md`；角色模型和推理强度配置写入 `<configDir>/oh-my-lite-openagent.json`。包内不再携带根目录 `opencode.json`；provider、API key、无关插件和自定义 agent 都属于用户自己的 OpenCode 配置。如果目标配置目录里只有 `opencode.jsonc`，安装器会读写 `opencode.jsonc`，不会额外创建 `opencode.json`；如果 `opencode.json` 和 `opencode.jsonc` 同时存在，则以 `opencode.json` 作为活动合并目标。
+然后只将 `scripts/managed-config.mjs` 中的插件/命令启动片段合并到 OpenCode 全局配置中。角色定义会生成到 OpenCode 原生 markdown agent 文件 `<configDir>/agents/*.md`；角色模型和推理强度配置写入 `<configDir>/oh-my-lite-openagent.json`。安装器会从 `opencode.json` 中移除旧的托管角色定义，避免全局配置和 markdown agent 文件出现两份托管角色；用户自定义 agent 会保留。包内不再携带根目录 `opencode.json`；provider、API key、无关插件和自定义 agent 都属于用户自己的 OpenCode 配置。如果目标配置目录里只有 `opencode.jsonc`，安装器会读写 `opencode.jsonc`，不会额外创建 `opencode.json`；如果 `opencode.json` 和 `opencode.jsonc` 同时存在，则以 `opencode.json` 作为活动合并目标。
 
-托管的命令行权限对 8 个真实角色默认较宽松：bash 默认 `allow`，只有危险或敏感命令会 `ask`，例如破坏性文件操作、系统提权/权限命令、会修改 git 历史或远端的命令、npm 发布/移除/改版本、真实写入 OpenCode 全局配置的安装器命令，以及下载后直接执行的管道/eval 形式。被禁用覆盖的 OpenCode 内置 `build` 和 `plan` 仍保持全拒绝。
+安装器只会为已经存在的目标文件写 `.bak` 备份，例如已有的 `opencode.json`/`opencode.jsonc` 或已有的 `<configDir>/agents/*.md`；首次创建的新文件不会额外生成空备份。
+
+托管的命令行权限对 8 个真实角色默认较宽松：bash 默认 `allow`，只有危险或敏感命令会 `ask`，例如破坏性文件操作、系统提权/权限命令、会修改 git 历史或远端的命令、npm 发布/移除/改版本、真实写入 OpenCode 全局配置的安装器命令，以及下载后直接执行的管道/eval 形式。该 bash 策略写在全局 `permission.bash`；如果用户已有自己的 `permission` 但缺少 `bash`，安装器会补齐托管的 bash 策略，同时保留用户已有的其他 permission 配置。如果用户已经显式配置了 `permission.bash`，安装器会保留用户配置。被禁用覆盖的 OpenCode 内置 `build` 和 `plan` 仍保持全拒绝。
+
+为了兼容 OpenCode 运行时，托管插件 hooks 和工具处理函数都返回 promise。路由解析、计划 DAG 校验、就绪检查、后台任务列表、运行时 profile 等 JSON 形态的工具结果会序列化为格式化 JSON 字符串，确保 provider/tool transport 收到稳定的文本输出。
 
 默认配置目录：
 
@@ -135,46 +141,26 @@ node scripts/install.mjs --dry-run
 oh-my-lite-openagent --interactive
 ```
 
-## npm 包发布流程
 
-包会暴露两个 CLI 名称：`oh-my-lite-openagent` 和 `omlo-install`。
+## Agentic 目标工作流命令
 
-发布前先检查：
+在 OpenCode TUI 里运行：
 
-```bash
-npm install
-npm test
-npm run typecheck
-npm run pack:dry-run
+```text
+/go <goal>
 ```
 
-发布演练：
+`/go` 会把目标交给 `command-lead`，按非交互式 Go Protocol 工作流执行。Command Lead 会根据目标和仓库约定推断可操作的验收标准，收集有界证据，选择最轻量的安全策略，直接实现或进行受限委派，验证结果，并持续推进直到验收通过或遇到硬阻塞。
 
-```bash
-npm run publish:dry-run
+示例：
+
+```text
+/go add tests for the managed command registration
+/go update the README with a concise installation troubleshooting note
 ```
 
-确认后发布：
+`/go` 是工作流命令，不是新的 OpenCode mode 或 agent。除非目标明确请求并授权，它不会提交、推送、发布、执行破坏性操作，也不会写入外部/用户本地 OpenCode 配置。
 
-```bash
-npm publish
-```
-
-如果 npm 提示输入一次性验证码（OTP），打开 npm 账号绑定的验证器 App，输入对应的 6 位验证码；也可以直接传入：
-
-```bash
-npm publish --otp 123456
-```
-
-如果不想交互式输入 OTP，可以在 npm 创建带发布权限且支持 bypass/automation 的 granular access token，然后用 token 发布：
-
-```bash
-npm config set //registry.npmjs.org/:_authToken=YOUR_NPM_TOKEN
-npm publish
-npm config delete //registry.npmjs.org/:_authToken
-```
-
-真实发布前 `prepublishOnly` 会自动执行测试、类型检查和打包演练。
 
 ## 角色与 Task Lead Profile 模型配置
 
@@ -393,6 +379,8 @@ npm run install:opencode
 - 不把隐藏 subagent 变成自治控制平面。
 - 每个角色的 todo 列表只作为本角色工作记忆，不替代 canonical state 或 artifact 记录。
 - Result Review 保持可选，并限定为审查 Command Lead 拥有的执行摘要。
+- Question tool 只用于可见决策角色中的有边界阻塞选择；当用户选择影响范围、验收或策略时，应记录到计划 artifact。
 - 派遣任务必须显式、有边界；不要使用隐藏 initiator marker，也不要要求 whole-repo 无边界搜索。
 - 插件工具名必须兼容 provider：`^[a-zA-Z0-9_-]+$`。
+- 插件 hooks 和工具处理函数应兼容 async，并返回稳定、provider-safe 的输出。
 - 安装时保留用户的 provider、model 和 API 配置。

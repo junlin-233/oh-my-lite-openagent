@@ -6,7 +6,7 @@ const installScript = readFileSync(path.resolve(process.cwd(), "scripts/install.
 describe("global installer contract", () => {
   it("does not treat old legacy role names as managed agents", () => {
     const managedAgentBlock = installScript.match(
-      /const MANAGED_AGENT_NAMES = new Set\(\[([\s\S]*?)\]\);/,
+      /const OUR_ROLE_NAMES = new Set\(\[([\s\S]*?)\]\);/,
     )?.[1] ?? "";
 
     expect(managedAgentBlock).not.toContain('"review"');
@@ -18,6 +18,7 @@ describe("global installer contract", () => {
   it("removes old managed command names during config merge", () => {
     expect(installScript).toContain("const MANAGED_COMMAND_NAMES = new Set");
     expect(installScript).toContain('"agent-models"');
+    expect(installScript).toContain('"go"');
     expect(installScript).toContain('"Character-model"');
     expect(installScript).toContain("!MANAGED_COMMAND_NAMES.has(commandName)");
   });
@@ -53,5 +54,25 @@ describe("global installer contract", () => {
     expect(installScript).toContain('"qwen3.6-plus"');
     expect(installScript).toContain('"kimi-k2.6"');
     expect(installScript).toContain('"minimax-m2.7"');
+  });
+
+  it("names built-in disabled overrides separately from real roles", () => {
+    expect(installScript).toContain("const BUILTIN_AGENT_OVERRIDES = new Set");
+    expect(installScript).toContain("const OUR_ROLE_NAMES = new Set");
+    expect(installScript).toContain("new Set([...BUILTIN_AGENT_OVERRIDES, ...OUR_ROLE_NAMES])");
+  });
+
+  it("keeps the installer JSONC parser synchronized with the runtime JSONC helper", () => {
+    expect(installScript).toContain("keep in sync with .opencode/lib/runtime/jsonc.ts");
+    expect(installScript).toContain("function stripJsonComments(content)");
+    expect(installScript).toContain("function stripTrailingCommas(content)");
+    expect(installScript).toContain("function parseJsonConfig(content)");
+  });
+
+  it("keeps install flow split into named steps", () => {
+    expect(installScript).toContain("async function prepareInstallContext(options)");
+    expect(installScript).toContain("function mergeAll(context)");
+    expect(installScript).toContain("async function runInteractiveSetup(liteConfig, context)");
+    expect(installScript).toContain("async function writeOutputs(context, mergedConfig, liteConfig)");
   });
 });

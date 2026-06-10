@@ -78,6 +78,20 @@ describe("OpenCode agent topology", () => {
     expect(JSON.stringify(config.plugin)).not.toContain('"multimodal": "');
   });
 
+  it("registers a /go command for non-interactive goal completion", () => {
+    expect(config.command?.go).toMatchObject({
+      agent: "command-lead",
+    });
+    expect(config.command?.go?.description).toContain("non-interactive agentic goal workflow");
+    expect(config.command?.go?.template).toContain("Go Protocol");
+    expect(config.command?.go?.template).toContain("$ARGUMENTS");
+    expect(config.command?.go?.template).toContain("non-interactive agentic goal-completion workflow");
+    expect(config.command?.go?.template).toContain("without asking clarification or preference questions");
+    expect(config.command?.go?.template).toContain("continue until verification and acceptance criteria succeed");
+    expect(config.command?.go?.template).toContain("Do not commit, push, publish");
+    expect(config.command?.go?.template).toContain("hard blocker");
+  });
+
   it("registers eight bounded roles plus disabled built-in overrides", () => {
     expect(Object.keys(config.agent)).toHaveLength(10);
     expect(config.agent.build).toMatchObject({ mode: "subagent", hidden: true });
@@ -248,6 +262,30 @@ describe("OpenCode agent topology", () => {
     expect(promptText).toContain("If a response is merely an execution result");
   });
 
+  it("requires Command Lead Go Protocol to stay non-interactive and bounded", () => {
+    const promptText = readPrompt("command-lead");
+
+    expect(promptText).toContain("## Go Protocol");
+    expect(promptText).toContain("managed `/go` command");
+    expect(promptText).toContain("non-interactive agentic goal-completion workflow");
+    expect(promptText).toContain("do not ask clarification or preference questions during the workflow");
+    expect(promptText).toContain("Continue through goal intake, evidence gathering, strategy selection");
+    expect(promptText).toContain("verification and acceptance criteria succeed");
+    expect(promptText).toContain("Do not commit, push, publish");
+    expect(promptText).toContain("hard blocker prevents completion");
+    expect(promptText).toContain("limited to execution, planning, and deep planning");
+  });
+
+  it("lets Command Lead present bounded user choices through the Question tool", () => {
+    const promptText = readPrompt("command-lead");
+
+    expect(promptText).toContain("## User Decision Selector");
+    expect(promptText).toContain("Question tool");
+    expect(promptText).toContain("2-5 user-facing options");
+    expect(promptText).toContain("Custom / other");
+    expect(promptText).toContain("Ask at most 3 decision questions");
+  });
+
   it("keeps Plan Builder aligned with the v2.1 plan spec", () => {
     const promptText = readPrompt("plan-builder");
 
@@ -274,6 +312,12 @@ describe("OpenCode agent topology", () => {
     expect(promptText).toContain("never `reviewed` or `M3`");
     expect(promptText).toContain("filenameHint");
     expect(promptText).toContain("durable artifact candidate");
+    expect(promptText).toContain("recommended_next_step: deep_plan_builder");
+    expect(promptText).toContain("## Decision Selector Discipline");
+    expect(promptText).toContain("Question tool");
+    expect(promptText).toContain("technology stack");
+    expect(promptText).toContain("Custom / other");
+    expect(promptText).toContain("[User Confirmed]");
   });
 
   it("requires Deep Plan Builder to return a filenameHint without owning persistence", () => {
@@ -284,6 +328,19 @@ describe("OpenCode agent topology", () => {
     expect(promptText).toContain("durable artifact candidate");
     expect(promptText).not.toContain("recommended_plan_path");
     expect(promptText).not.toContain("You design, persist, and review the detailed plan artifact");
+    expect(promptText).toContain("## Decision Selector Discipline");
+    expect(promptText).toContain("Question tool");
+    expect(promptText).toContain("migration strategy");
+    expect(promptText).toContain("Custom / other");
+    expect(promptText).toContain("[User Confirmed]");
+  });
+
+  it("requires Task Lead and reviewers to request scoped evidence when needed", () => {
+    expect(readPrompt("task-lead")).toContain("require scoped Explore evidence");
+    expect(readPrompt("task-lead")).toContain("required Explore evidence is missing");
+    expect(readPrompt("plan-review")).toContain("actively request scoped Explore evidence");
+    expect(readPrompt("plan-review")).toContain("without locatable evidence");
+    expect(readPrompt("result-review")).toContain("actively request scoped Explore evidence");
   });
 
   it("requires every delegating role to use the standard assignment fields", () => {

@@ -849,6 +849,10 @@ function toToolOutput(value: unknown): { output: string; metadata: Record<string
   };
 }
 
+function formatToolJsonOutput(value: unknown): string {
+  return JSON.stringify(value);
+}
+
 function inferModelConfigAction(payload: unknown): ModelConfigAction {
   if (!isRecord(payload)) return "list";
   const action = payload["action"];
@@ -1176,7 +1180,7 @@ export function createBoundedLitePlugin(
   let runtimePlanArtifactSession: RuntimePlanArtifactSession | undefined;
 
   return {
-    config() {
+    async config() {
       if (options.maxChildDepth > MAX_CHILD_ORCHESTRATOR_DEPTH) {
         throw new Error(
           `maxChildDepth must stay <= ${MAX_CHILD_ORCHESTRATOR_DEPTH} to preserve bounded orchestration.`,
@@ -1194,7 +1198,7 @@ export function createBoundedLitePlugin(
             throw new Error("Route tool requires a valid bounded routing category.");
           }
 
-          return toToolOutput(resolveCategoryRoute(category));
+          return formatToolJsonOutput(resolveCategoryRoute(category));
         },
       },
       bounded_lite_plan_dag: {
@@ -1207,7 +1211,7 @@ export function createBoundedLitePlugin(
             options,
           );
 
-          return toToolOutput(buildTaskDAG(payload, dispatch as Partial<TaskDispatchConfig>));
+          return formatToolJsonOutput(buildTaskDAG(payload, dispatch as Partial<TaskDispatchConfig>));
         },
       },
       bounded_lite_plan_readiness: {
@@ -1220,7 +1224,7 @@ export function createBoundedLitePlugin(
             options,
           );
 
-          return toToolOutput(validatePlanReadiness(payload, dispatch as Partial<TaskDispatchConfig>));
+          return formatToolJsonOutput(validatePlanReadiness(payload, dispatch as Partial<TaskDispatchConfig>));
         },
       },
       bounded_lite_plan_artifact: {
@@ -1372,14 +1376,14 @@ Examples:
         description: "List currently tracked background tasks from the bounded coordinator.",
         args: {},
         async execute() {
-          return toToolOutput(background.list());
+          return formatToolJsonOutput(background.list());
         },
       },
       bounded_lite_runtime_profile: {
         description: "Report the current runtime profile without creating a second control plane.",
         args: {},
         async execute() {
-          return toToolOutput(runtimeProfile);
+          return formatToolJsonOutput(runtimeProfile);
         },
       },
       bounded_lite_model_config: {
@@ -1715,7 +1719,7 @@ If no provider models are found, tell the user to configure or connect OpenCode 
         },
       },
     },
-    "permission.ask"(input, output) {
+    async "permission.ask"(input, output) {
       if (input.tool.startsWith("bounded_lite_")) {
         output.status = "allow";
       }
@@ -1733,7 +1737,7 @@ If no provider models are found, tell the user to configure or connect OpenCode 
         output.args = { ...output.args };
       }
     },
-    "tool.execute.after"(_input, output) {
+    async "tool.execute.after"(_input, output) {
       output.output = output.output;
     },
   };

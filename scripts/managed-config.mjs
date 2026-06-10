@@ -69,6 +69,20 @@ const PERMISSIVE_BASH_PERMISSION = {
   "umount *": "ask"
 };
 
+const GO_COMMAND_TEMPLATE = `Run Go Protocol for this user goal:
+$ARGUMENTS
+
+Treat $ARGUMENTS as the user's goal and work as a non-interactive agentic goal-completion workflow through command-lead.
+
+Workflow:
+1. Infer practical acceptance criteria from the goal and repository conventions without asking clarification or preference questions.
+2. Gather scoped evidence before touching sensitive surfaces, then choose the lightest safe strategy: direct execution, bounded planning, or delegated subtasks.
+3. Implement the goal, verify the result, and continue until verification and acceptance criteria succeed.
+4. Close with a concise summary of what changed and any remaining limitations.
+
+Do not commit, push, publish, perform destructive actions, or write external/user-local config unless the user explicitly requested that action in the goal.
+If a safety, permission, missing-secret, impossible-condition, or explicit-authorization hard blocker prevents completion, stop and return a blocked report naming the blocker and the required authorization or condition.`;
+
 export const MANAGED_CONFIG = {
   "$schema": "https://opencode.ai/config.json",
   "default_agent": "command-lead",
@@ -310,6 +324,11 @@ export const MANAGED_CONFIG = {
       "description": "Import available OpenCode provider models, preview recommended per-role model/reasoning effort and Task Lead profile assignments, and apply them after user confirmation.",
       "agent": "command-lead",
       "template": "Configure model assignments for Oh My Lite OpenAgent roles and Task Lead profiles.\n\n## Goal\n\nUse AI to recommend role models and Task Lead profile models from all available OpenCode model providers. The AI must not invent provider/model IDs.\n\nTask Lead profiles do not add new agents. They are selected from `plan.subtasks[].attributes` and provide dispatch metadata such as recommended model, fallback chain, and prompt guidance. Do not create new Task Lead agents. Current execution still uses the single hidden `task-lead` agent unless the runtime supports per-task model override.\n\n## Required Workflow\n\n0. Execution owner must be command-lead. Do not delegate /agent-models execution to task or task-lead. If delegation happened, treat it as flow drift and rerun directly from command-lead.\n\n1. Import the available model pool. By default this includes every discovered provider, including OpenCode subscription providers such as opencode and opencode-go. The current global model is context only and must not be used as a hard import filter.\n\n```\nbounded_lite_model_config({ action: \"import\" })\n```\n\n2. Ask the tool to show the usable imported model pool first, then generate recommended assignments. This is a preview only and must not write config.\n\n```\nbounded_lite_model_config({ action: \"auto\" })\n```\n\naction=auto is recommendation-only. It returns the available imported model pool before role recommendations and Task Lead profile recommendations, including `Recommended Task Lead profile assignments JSON`.\n\n3. Show the available model pool, then the recommended role assignments and Task Lead profile assignments to the user, and ask whether they want changes. If the user wants changes, revise only by choosing model IDs returned by action=import/auto.\n\n4. Apply only after the user accepts the recommendations or gives modifications.\n\n```\nbounded_lite_model_config({\n  action: \"apply\",\n  assignments: {\n    \"command-lead\": \"provider/model\",\n    \"explore\": \"provider/model\"\n  },\n  taskLeadProfileAssignments: {\n    \"code\": \"provider/model\",\n    \"quick\": \"provider/model\",\n    \"visual\": \"provider/model\"\n  }\n})\n```\n\n5. If needed, read back effective assignments.\n\n```\nbounded_lite_model_config({ action: \"list\" })\n```\n\n## Hard Constraints\n\n- Always pass an explicit action field: import, auto, apply, or list.\n- Forbidden: `bounded_lite_model_config({})`.\n- Forbidden: any call that omits `action`.\n- Never invent provider/model IDs. Choose only from action=import or action=auto returned model pool.\n\n## Failure Recovery\n\n- If tool returns `MODELCFG_ERR_MISSING_ACTION`, immediately retry with the intended explicit `action`.\n- Do not continue with empty payload calls after this error.\n\n## Evidence Requirement\n\nUse structured tool_use logs as acceptance evidence, not only natural language replies.\n\n## Notes\n\nIf the imported pool is empty, guide the user to connect providers first (for example: finish connect 之后 verify runtime provider models, check auth.json/models.dev state), then rerun import/auto.\n"
+    },
+    "go": {
+      "description": "Run a non-interactive agentic goal workflow through Command Lead.",
+      "agent": "command-lead",
+      "template": GO_COMMAND_TEMPLATE
     }
   },
   "permission": {
@@ -345,6 +364,7 @@ export const MANAGED_CONFIG = {
       "description": "Main orchestrator for execution work with approval and state ownership.",
       "prompt": "{file:./.opencode/agents/command-lead.md}",
       "permission": {
+        "question": "allow",
         "task": {
           "*": "deny",
           "plan-builder": "allow",
@@ -354,8 +374,7 @@ export const MANAGED_CONFIG = {
           "librarian": "allow",
           "plan-review": "allow",
           "result-review": "allow"
-        },
-        "bash": { ...PERMISSIVE_BASH_PERMISSION }
+        }
       }
     },
     "plan-builder": {
@@ -363,6 +382,7 @@ export const MANAGED_CONFIG = {
       "description": "Visible planner with explicit discussion mode for user-facing planning and internal normalize mode for stable skeleton convergence.",
       "prompt": "{file:./.opencode/agents/plan-builder.md}",
       "permission": {
+        "question": "allow",
         "task": {
           "*": "deny",
           "explore": "allow",
@@ -371,8 +391,7 @@ export const MANAGED_CONFIG = {
         },
         "edit": {
           "*": "allow"
-        },
-        "bash": { ...PERMISSIVE_BASH_PERMISSION }
+        }
       }
     },
     "deep-plan-builder": {
@@ -381,6 +400,7 @@ export const MANAGED_CONFIG = {
       "description": "Visible deep planner that produces detailed handoff plans for lower-strength executors with mandatory plan review.",
       "prompt": "{file:./.opencode/agents/deep-plan-builder.md}",
       "permission": {
+        "question": "allow",
         "task": {
           "*": "deny",
           "explore": "allow",
@@ -391,8 +411,7 @@ export const MANAGED_CONFIG = {
           "*": "deny",
           ".liteagent/**": "allow",
           "**/.liteagent/**": "allow"
-        },
-        "bash": { ...PERMISSIVE_BASH_PERMISSION }
+        }
       }
     },
     "build": {
@@ -442,8 +461,7 @@ export const MANAGED_CONFIG = {
         },
         "edit": {
           "*": "allow"
-        },
-        "bash": { ...PERMISSIVE_BASH_PERMISSION }
+        }
       }
     },
     "explore": {
@@ -458,7 +476,6 @@ export const MANAGED_CONFIG = {
         "edit": {
           "*": "deny"
         },
-        "bash": { ...PERMISSIVE_BASH_PERMISSION },
         "webfetch": "deny",
         "websearch": "deny"
       }
@@ -475,7 +492,6 @@ export const MANAGED_CONFIG = {
         "edit": {
           "*": "deny"
         },
-        "bash": { ...PERMISSIVE_BASH_PERMISSION },
         "webfetch": "allow",
         "websearch": "allow"
       }
@@ -492,8 +508,7 @@ export const MANAGED_CONFIG = {
         },
         "edit": {
           "*": "deny"
-        },
-        "bash": { ...PERMISSIVE_BASH_PERMISSION }
+        }
       }
     },
     "result-review": {
@@ -508,8 +523,7 @@ export const MANAGED_CONFIG = {
         },
         "edit": {
           "*": "deny"
-        },
-        "bash": { ...PERMISSIVE_BASH_PERMISSION }
+        }
       }
     }
   }
