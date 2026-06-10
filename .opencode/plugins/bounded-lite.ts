@@ -482,7 +482,6 @@ async function writeLiteConfigFile(liteConfig: LiteOpenAgentConfig, configDir?: 
 
 async function updateGeneratedAgentMarkdownFiles(
   liteConfig: LiteOpenAgentConfig,
-  models: ReturnType<typeof listProviderModels>,
   configDir?: string,
 ): Promise<string[]> {
   const directory = defaultConfigDir(configDir);
@@ -499,15 +498,9 @@ async function updateGeneratedAgentMarkdownFiles(
       if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") throw error;
     }
     const model = liteConfig.roleModels[role.name];
-    const modelInfo = model ? models.find((item) => item.id === model) ?? model : undefined;
-    const effectiveReasoning = resolveSupportedReasoningEffort({
-      ...(modelInfo ? { model: modelInfo } : {}),
-      ...(liteConfig.roleReasoningEffort[role.name] ? { requested: liteConfig.roleReasoningEffort[role.name] } : {}),
-      fallback: defaultRoleReasoningEffort(role.name),
-    });
     const nextContent = upsertMarkdownFrontmatter(content, {
       ...(model ? { model } : {}),
-      ...(effectiveReasoning ? { reasoningEffort: effectiveReasoning } : {}),
+      reasoningEffort: undefined,
     });
     await writeFile(`${filePath}.bak`, content);
     await writeFile(filePath, nextContent);
@@ -517,7 +510,7 @@ async function updateGeneratedAgentMarkdownFiles(
   return updated;
 }
 
-function upsertMarkdownFrontmatter(content: string, updates: Record<string, string>): string {
+function upsertMarkdownFrontmatter(content: string, updates: Record<string, string | undefined>): string {
   const match = content.match(/^---\n([\s\S]*?)\n---\n?/);
   const body = match ? content.slice(match[0].length) : content;
   const frontmatter = match?.[1] ?? "";
@@ -526,6 +519,7 @@ function upsertMarkdownFrontmatter(content: string, updates: Record<string, stri
     return key !== "model" && key !== "reasoningEffort";
   });
   for (const [key, value] of Object.entries(updates)) {
+    if (!value) continue;
     lines.push(`${key}: ${yamlScalar(value)}`);
   }
   return `---\n${lines.join("\n")}\n---\n\n${body.replace(/^\n+/, "")}`;
@@ -670,6 +664,7 @@ interface ModelConfigRequest {
   providerPreference?: string[];
   familyPreference?: string[];
   allowCodexBackend?: boolean;
+  allowUnavailableModels?: boolean;
 }
 
 interface ModelConfigValidationError {
@@ -1122,6 +1117,7 @@ function parseModelConfigRequest(payload: unknown): ModelConfigRequest {
     "providerPreference",
     "familyPreference",
     "allowCodexBackend",
+    "allowUnavailableModels",
   ]);
 
   for (const key of Object.keys(payload)) {
@@ -1158,6 +1154,9 @@ function parseModelConfigRequest(payload: unknown): ModelConfigRequest {
       : {}),
     ...(typeof payload["allowCodexBackend"] === "boolean"
       ? { allowCodexBackend: payload["allowCodexBackend"] }
+      : {}),
+    ...(typeof payload["allowUnavailableModels"] === "boolean"
+      ? { allowUnavailableModels: payload["allowUnavailableModels"] }
       : {}),
   };
 }
@@ -1444,7 +1443,11 @@ If no provider models are found, tell the user to configure or connect OpenCode 
             const request = parseModelConfigRequest(args);
             const action = request.action;
             const config = await readOpenCodeConfig(options.configDir);
-            const effectiveConfig = withConfiguredTaskLeadProfiles(config, options);
+            const liteConfig = await readLiteConfigFile(options.configDir, config);
+            const effectiveConfig = withLiteConfigAppliedToOpenCodeConfig(
+              withConfiguredTaskLeadProfiles(config, options),
+              liteConfig,
+            );
             const credentialProviderIds = await readOpenCodeAuthProviderIds();
             const runtimeModels = await listRuntimeProviderModels(context);
             const modelsDevModels = await listModelsDevProviderModels(credentialProviderIds);
@@ -1626,36 +1629,28 @@ If no provider models are found, tell the user to configure or connect OpenCode 
                 } satisfies ModelConfigResponse);
               }
 
-              const result = hasRoleAssignments ? applyRoleModelConfig(
-                config,
+              const result = hasRoleAssignments ? applyLiteRoleModelConfig(
+                liteConfig,
                 roleModelAssignments,
                 importedPool.map((model) => model.id),
-                { allowUnavailableModels: true },
+                { allowUnavailableModels: request.allowUnavailableModels !== false },
               ) : { changed: [], skipped: [], warnings: [] };
-              const reasoningResult = hasReasoningAssignments ? applyRoleReasoningEffortConfig(
-                config,
+              const reasoningResult = hasReasoningAssignments ? applyLiteRoleReasoningEffortConfig(
+                liteConfig,
                 reasoningEffortAssignments,
               ) : { changed: [], skipped: [] };
-              const profileConfig = withConfiguredTaskLeadProfiles(config, options);
-              const profileResult = hasProfileAssignments ? applyTaskLeadProfileModelConfig(
-                profileConfig,
+              const profileResult = hasProfileAssignments ? applyLiteTaskLeadProfileModelConfig(
+                liteConfig,
                 taskLeadProfileAssignments as Record<string, unknown>,
                 importedPool.map((model) => model.id),
-                { allowUnavailableModels: true },
+                { allowUnavailableModels: request.allowUnavailableModels !== false },
               ) : { changed: [], skipped: [], warnings: [] };
-              if (hasProfileAssignments || isRecord(config["taskLeadProfiles"])) {
-                const profiles = isRecord(profileConfig["taskLeadProfiles"])
-                  ? profileConfig["taskLeadProfiles"]
-                  : {};
-                writeTaskLeadProfilesToPluginOptions(config, profiles);
-              }
-              const updatedEffectiveConfig = withConfiguredTaskLeadProfiles(config, {
-                ...options,
-                taskLeadProfiles: isRecord(profileConfig["taskLeadProfiles"])
-                  ? profileConfig["taskLeadProfiles"]
-                  : {},
-              });
-              const configPath = await writeOpenCodeConfig(config, options.configDir);
+              const liteConfigPath = await writeLiteConfigFile(liteConfig, options.configDir);
+              const updatedAgents = await updateGeneratedAgentMarkdownFiles(liteConfig, options.configDir);
+              const updatedEffectiveConfig = withLiteConfigAppliedToOpenCodeConfig(
+                withConfiguredTaskLeadProfiles(config, options),
+                liteConfig,
+              );
               const changedKeys = collectChangedKeys({
                 roleChanged: result.changed,
                 profileChanged: profileResult.changed,
@@ -1707,7 +1702,9 @@ If no provider models are found, tell the user to configure or connect OpenCode 
                     reasoningSkipped: reasoningResult.skipped,
                   }),
                   "",
-                  `Updated ${configPath}. Restart OpenCode or start a new session if the active TUI keeps old model state.`,
+                  `Updated ${liteConfigPath}.`,
+                  `Updated agent markdown files: ${updatedAgents.length > 0 ? updatedAgents.join(", ") : "none"}.`,
+                  "Restart OpenCode or start a new session if the active TUI keeps old model state.",
                 ].join("\n"),
               } satisfies ModelConfigResponse);
             }

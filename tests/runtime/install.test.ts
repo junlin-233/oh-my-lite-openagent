@@ -23,6 +23,15 @@ describe("global installer contract", () => {
     expect(installScript).toContain("!MANAGED_COMMAND_NAMES.has(commandName)");
   });
 
+  it("tracks managed MCP names separately from user MCP servers", () => {
+    expect(installScript).toContain("const MANAGED_MCP_NAMES = new Set");
+    expect(installScript).toContain('"context7"');
+    expect(installScript).toContain('"playwright"');
+    expect(installScript).toContain("function mergeMcp(existingMcp, sourceMcp, managedMcp = true)");
+    expect(installScript).toContain("MANAGED_MCP_NAMES.has(serverName)");
+    expect(installScript).toContain("--no-managed-mcp");
+  });
+
   it("writes the target configDir into the managed plugin options", () => {
     expect(installScript).toContain("function relativePluginSpec(configDir, taskLeadProfiles)");
     expect(installScript).toContain("configDir,");

@@ -18,11 +18,12 @@
 - 可见决策角色（`command-lead`、`plan-builder`、`deep-plan-builder`）可以用 OpenCode 的 `Question tool` 呈现有边界的阻塞选择；隐藏内部角色不进入用户可见的决策循环。
 - `plan-builder` 和 `deep-plan-builder` 带有 Decision Selector Discipline，会把阻塞选择收敛成 2-5 个具体选项；当允许用户自定义输入时保留 `Custom / other`。
 - `result-review` 是用户可选择调用的可选审查，只审查 Command Lead 的执行摘要/最终整合结果，不审查 Task Lead 子任务返回。
-- 有委派权的角色派遣任务时使用显式模板：`TASK`、`EXPECTED OUTCOME`、`ROLE`、`SCOPE`、`UPSTREAM EVIDENCE`、`REQUIRED TOOLS`、`MUST DO`、`MUST NOT DO`、`CONTEXT`、`DELIVERABLE FORMAT`、`FAILURE RETURN`。
+- 有委派权的角色派遣任务时使用显式模板：`TASK`、`EXPECTED OUTCOME`、`ROLE`、`SCOPE`、`UPSTREAM EVIDENCE`、`REQUIRED TOOLS`、`MUST DO`、`MUST NOT DO`、`CONTEXT`、`DELIVERABLE FORMAT`、`FAILURE RETURN`；新建 subagent 任务时完全省略 `task_id`。
 - 持久化计划 artifact 会写入 `.liteagent/plans/`，并追加索引 `.liteagent/plan-index.jsonl`。
+- 在用户拥有的中小型项目中，Command Lead 会倾向根因重构和完整的问题导向修复，而不是偶发兼容 shim 或狭窄局部补丁；但仍会保留公开 API、持久化格式、安装器/配置契约、权限边界、角色拓扑、外部集成和用户明确约束。
 - 兼容 provider 的异步插件工具：`bounded_lite_route`、`bounded_lite_plan_dag`、`bounded_lite_plan_readiness`、`bounded_lite_plan_artifact`、`bounded_lite_background`、`bounded_lite_runtime_profile`、`bounded_lite_model_config`。
 - OpenCode 原生 `build` 和 `plan` 模式会被隐藏并禁用。
-- 全局安装器会保留你已有的 model、provider、API key、插件和自定义 agent。
+- 全局安装器会保留你已有的 model、provider、API key、插件、MCP 和自定义 agent。
 
 
 ## AI 安装
@@ -106,7 +107,11 @@ agents/*.md
 oh-my-lite-openagent.json
 ```
 
-然后只将 `scripts/managed-config.mjs` 中的插件/命令启动片段合并到 OpenCode 全局配置中。角色定义会生成到 OpenCode 原生 markdown agent 文件 `<configDir>/agents/*.md`；角色模型和推理强度配置写入 `<configDir>/oh-my-lite-openagent.json`。安装器会从 `opencode.json` 中移除旧的托管角色定义，避免全局配置和 markdown agent 文件出现两份托管角色；用户自定义 agent 会保留。包内不再携带根目录 `opencode.json`；provider、API key、无关插件和自定义 agent 都属于用户自己的 OpenCode 配置。如果目标配置目录里只有 `opencode.jsonc`，安装器会读写 `opencode.jsonc`，不会额外创建 `opencode.json`；如果 `opencode.json` 和 `opencode.jsonc` 同时存在，则以 `opencode.json` 作为活动合并目标。
+然后只将 `scripts/managed-config.mjs` 中的插件/命令/MCP 启动片段合并到 OpenCode 全局配置中。角色定义会生成到 OpenCode 原生 markdown agent 文件 `<configDir>/agents/*.md`；角色模型和推理强度配置写入 `<configDir>/oh-my-lite-openagent.json`。安装器会从 `opencode.json` 中移除旧的托管角色定义，避免全局配置和 markdown agent 文件出现两份托管角色；用户自定义 agent 会保留。包内不再携带根目录 `opencode.json`；provider、API key、无关插件、MCP 和自定义 agent 都属于用户自己的 OpenCode 配置。如果目标配置目录里只有 `opencode.jsonc`，安装器会读写 `opencode.jsonc`，不会额外创建 `opencode.json`；如果 `opencode.json` 和 `opencode.jsonc` 同时存在，则以 `opencode.json` 作为活动合并目标。
+
+默认情况下，安装器会补齐零密钥托管 MCP：`context7`（`npx -y @upstash/context7-mcp`）和 `playwright`（`npx -y @playwright/mcp`）。用户已有的 MCP server 会保留；如果用户已经定义了 `context7` 或 `playwright`，用户配置优先。若要跳过这些托管 MCP 默认项，可运行 `npm run install:opencode -- --no-managed-mcp` 或 `node scripts/install.mjs --no-managed-mcp`。
+
+生成的 `<configDir>/agents/*.md` 是托管输出文件。不要通过手改这些文件保存长期偏好；请使用 `/agent-models`、OpenCode 配置或重新运行安装器，避免下次生成时被覆盖。
 
 安装器只会为已经存在的目标文件写 `.bak` 备份，例如已有的 `opencode.json`/`opencode.jsonc` 或已有的 `<configDir>/agents/*.md`；首次创建的新文件不会额外生成空备份。
 
@@ -214,7 +219,7 @@ bounded_lite_model_config({ action: "apply", assignments: { "command-lead": "ope
 
 命令会把角色模型写入 `<configDir>/oh-my-lite-openagent.json`，并重新生成 `<configDir>/agents/*.md`，让 OpenCode 从 markdown agent frontmatter 读取对应模型。它不再把 `agent.<role>.model` 写入 `opencode.json`。默认会拒绝导入池外的模型，避免 AI 编造 provider/model。
 
-也可以配置推理强度。Oh My Lite 接受 `minimal`、`low`、`medium`、`high`、`xhigh`、`extra-high`、`max`、`maximum` 等常见值和别名。非法值会回退到角色/profile 默认值；模型厂商不支持的值会降级到安全支持值，或省略该字段让 provider 使用默认行为。
+也可以显式配置推理强度。Oh My Lite 会把推理强度视为用户偏好：`action: "auto"` 只预览推荐；只传模型的 `action: "apply"` 不会持久化默认推理强度；已有 OpenCode agent/session 选择（例如 `Ctrl+T`）会继续优先，除非你显式传入 `reasoningEffortAssignments`。Oh My Lite 接受 `minimal`、`low`、`medium`、`high`、`xhigh`、`extra-high`、`max`、`maximum` 等常见值和别名。非法值会回退到角色/profile 默认值；模型厂商不支持的值会降级到安全支持值，或省略该字段让 provider 使用默认行为。
 
 ```text
 bounded_lite_model_config({
@@ -231,6 +236,8 @@ bounded_lite_model_config({ action: "apply", taskLeadProfileAssignments: { "code
 ```
 
 内置 profile 包括 `quick`、`code`、`research`、`writing`、`visual`、`deep`、`risk-high`。
+
+委派隐藏 subagent 时，新建 Task 工具调用必须完全省略 `task_id`。只有恢复 Task 工具已经返回过的真实子会话时才传 `task_id`；不要传空字符串、占位符、null-like 值或伪造 id。
 
 也可以同时写入角色模型和 profile 模型：
 

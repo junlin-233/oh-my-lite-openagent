@@ -15,6 +15,10 @@ const MANAGED_COMMAND_NAMES = new Set([
   "go",
   "Character-model",
 ]);
+const MANAGED_MCP_NAMES = new Set([
+  "context7",
+  "playwright",
+]);
 const BUILTIN_AGENT_OVERRIDES = new Set([
   "build",
   "plan",
@@ -456,6 +460,11 @@ function parseArgs(argv) {
       continue;
     }
 
+    if (arg === "--no-managed-mcp") {
+      args.managedMcp = false;
+      continue;
+    }
+
     if (arg === "--config-dir") {
       const value = argv[index + 1];
       if (!value) throw new Error("--config-dir requires a path");
@@ -759,7 +768,20 @@ function mergePermission(existingPermission, sourcePermission) {
   };
 }
 
-function mergeConfig(existingConfig, sourceConfig, configDir) {
+function mergeMcp(existingMcp, sourceMcp, managedMcp = true) {
+  if (!managedMcp || !isRecord(sourceMcp)) return existingMcp;
+  const managedSourceMcp = Object.fromEntries(
+    Object.entries(sourceMcp).filter(([serverName]) => MANAGED_MCP_NAMES.has(serverName)),
+  );
+  if (!isRecord(existingMcp)) return managedSourceMcp;
+
+  return {
+    ...managedSourceMcp,
+    ...existingMcp,
+  };
+}
+
+function mergeConfig(existingConfig, sourceConfig, configDir, options = {}) {
   const legacyTaskLeadProfiles = isRecord(existingConfig.taskLeadProfiles)
     ? existingConfig.taskLeadProfiles
     : undefined;
@@ -794,6 +816,7 @@ function mergeConfig(existingConfig, sourceConfig, configDir) {
     ...existingWithoutLegacyProfiles,
     $schema: existingConfig.$schema ?? sourceConfig.$schema,
     plugin: plugins,
+    mcp: mergeMcp(existingConfig.mcp, sourceConfig.mcp, options.managedMcp),
     default_agent: sourceConfig.default_agent,
     permission: mergePermission(existingConfig.permission, sourceConfig.permission),
     command: {
@@ -869,9 +892,8 @@ function agentFrontmatter(agent, liteConfig, agentName) {
   const frontmatter = { ...agent };
   delete frontmatter.prompt;
   const model = liteConfig.roleModels[agentName];
-  const reasoningEffort = liteConfig.roleReasoningEffort[agentName];
   if (model) frontmatter.model = model;
-  if (reasoningEffort) frontmatter.reasoningEffort = reasoningEffort;
+  delete frontmatter.reasoningEffort;
   return yamlLines(frontmatter).join("\n");
 }
 
@@ -889,11 +911,12 @@ async function writeManagedAgentMarkdownFiles(rootDir, configDir, liteConfig, dr
     } else {
       promptText = `# ${agentName}\n`;
     }
-    const content = `---\n${agentFrontmatter(agent, liteConfig, agentName)}\n---\n\n${promptText.trimEnd()}\n`;
     const targetPath = path.join(targetAgentsDir, `${agentName}.md`);
+    const existingContent = await fileExists(targetPath) ? await readFile(targetPath, "utf8") : "";
+    const content = `---\n${agentFrontmatter(agent, liteConfig, agentName)}\n---\n\n${promptText.trimEnd()}\n`;
     if (!dryRun) {
-      if (await fileExists(targetPath)) {
-        await writeFile(`${targetPath}.bak`, await readFile(targetPath, "utf8"));
+      if (existingContent) {
+        await writeFile(`${targetPath}.bak`, existingContent);
       }
       await writeFile(targetPath, content);
     }
@@ -932,6 +955,7 @@ async function prepareInstallContext(options) {
     existingLiteConfig,
     dryRun: Boolean(options.dryRun),
     interactive: Boolean(options.interactive),
+    managedMcp: options.managedMcp !== false,
     sourceOpenCodeDir: path.join(rootDir, ".opencode"),
     targetOpenCodeDir: path.join(configDir, ".opencode"),
   };
@@ -940,7 +964,9 @@ async function prepareInstallContext(options) {
 function mergeAll(context) {
   return {
     liteConfig: mergeLiteConfig(context.existingLiteConfig, context.existingConfig),
-    mergedConfig: mergeConfig(context.existingConfig, MANAGED_CONFIG, context.configDir),
+    mergedConfig: mergeConfig(context.existingConfig, MANAGED_CONFIG, context.configDir, {
+      managedMcp: context.managedMcp,
+    }),
   };
 }
 

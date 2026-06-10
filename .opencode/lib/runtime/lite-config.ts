@@ -182,8 +182,10 @@ export function withLiteConfigAppliedToOpenCodeConfig(
     const agent: Record<string, unknown> = isRecord(rawAgent) ? { ...rawAgent } : {};
     const model = liteConfig.roleModels[role.name];
     const effort = liteConfig.roleReasoningEffort[role.name];
+    const currentEffort = normalizeLiteReasoningEffort(agent["reasoningEffort"])
+      ?? (isRecord(agent["options"]) ? normalizeLiteReasoningEffort(agent["options"]["reasoningEffort"]) : undefined);
     if (model) agent["model"] = model;
-    if (effort) agent["reasoningEffort"] = effort;
+    if (effort && !currentEffort) agent["reasoningEffort"] = effort;
     agents[role.name] = agent;
   }
 
@@ -290,6 +292,7 @@ export function applyLiteRoleModelConfig(
     }
 
     const previous = liteConfig.roleModels[role as RoleName];
+    if (previous === model) continue;
     liteConfig.roleModels[role as RoleName] = model;
     changed.push({ role: role as RoleName, ...(previous ? { previous } : {}), next: model });
   }
@@ -318,6 +321,7 @@ export function applyLiteRoleReasoningEffortConfig(
       continue;
     }
     const previous = liteConfig.roleReasoningEffort[role as RoleName];
+    if (previous === effort) continue;
     liteConfig.roleReasoningEffort[role as RoleName] = effort;
     changed.push({ role: role as RoleName, ...(previous ? { previous } : {}), next: effort });
   }
@@ -364,6 +368,7 @@ export function applyLiteTaskLeadProfileModelConfig(
 
     const profile: LiteTaskLeadProfileConfig = liteConfig.taskLeadProfiles[profileName] ?? {};
     const previous = profile.model;
+    if (previous === model) continue;
     liteConfig.taskLeadProfiles[profileName] = { ...profile, model };
     changed.push({ profile: profileName, ...(previous ? { previous } : {}), next: model });
   }
@@ -386,6 +391,7 @@ export function applyLiteTaskLeadProfileReasoningEffortConfig(
     const effort = normalizeLiteReasoningEffort(value) ?? defaultTaskLeadProfileReasoningEffort(profileName);
     const profile = liteConfig.taskLeadProfiles[profileName] ?? {};
     const previous = profile.reasoningEffort;
+    if (previous === effort) continue;
     liteConfig.taskLeadProfiles[profileName] = { ...profile, reasoningEffort: effort };
     changed.push({ profile: profileName, ...(previous ? { previous } : {}), next: effort, ...(normalizeLiteReasoningEffort(value) ? {} : { requested: String(value) }) });
   }

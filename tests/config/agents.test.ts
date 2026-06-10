@@ -12,6 +12,7 @@ const config = managedConfigModule.MANAGED_CONFIG as {
   small_model?: unknown;
   command?: Record<string, { agent?: string; template?: string; description?: string }>;
   plugin?: unknown;
+  mcp?: Record<string, { type?: string; command?: string[] }>;
   agent: Record<
     string,
     {
@@ -90,6 +91,17 @@ describe("OpenCode agent topology", () => {
     expect(config.command?.go?.template).toContain("continue until verification and acceptance criteria succeed");
     expect(config.command?.go?.template).toContain("Do not commit, push, publish");
     expect(config.command?.go?.template).toContain("hard blocker");
+  });
+
+  it("registers zero-secret managed MCP defaults", () => {
+    expect(config.mcp?.context7).toEqual({
+      type: "local",
+      command: ["npx", "-y", "@upstash/context7-mcp"],
+    });
+    expect(config.mcp?.playwright).toEqual({
+      type: "local",
+      command: ["npx", "-y", "@playwright/mcp"],
+    });
   });
 
   it("registers eight bounded roles plus disabled built-in overrides", () => {

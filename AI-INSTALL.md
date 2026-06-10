@@ -113,8 +113,11 @@ Confirm:
 - `command-lead` tools include `bounded_lite_model_config`.
 - `/agent-models` is registered in OpenCode commands.
 - `/go` is registered in OpenCode commands and targets `command-lead`.
+- Managed zero-secret MCP defaults include `context7` and `playwright`, unless installation used `--no-managed-mcp`.
 - `build` mode is `subagent`.
 - `plan` mode is `subagent`.
+
+Generated `<configDir>/agents/*.md` files are managed outputs. Durable role model and reasoning settings should be changed through `/agent-models`, OpenCode config, or the installer rather than hand-editing generated agent markdown.
 
 The managed plugin hooks and tool handlers are async-compatible. JSON-shaped tool results, such as route resolution or runtime profile output, are returned as formatted JSON strings for stable provider/tool transport behavior.
 
@@ -132,7 +135,10 @@ Each role should have a `model` field with the best available `provider/model` a
 - Preserve the user's existing model setting (unless the user explicitly changes it via this command).
 - Preserve API keys and never print them.
 - Preserve unrelated plugins.
+- Preserve unrelated MCP servers and user-defined `context7`/`playwright` MCP entries.
 - Preserve custom agents.
+- Preserve user runtime/control preferences: do not persist `reasoningEffort` unless the user explicitly requests it through `reasoningEffortAssignments`; OpenCode session choices such as `Ctrl+T` remain in control.
+- For any new Task tool subagent call, omit `task_id` entirely. Pass `task_id` only when resuming a real prior returned task id; never pass an empty string, placeholder, null-like value, or fabricated id.
 - Remove stale Oh My Lite managed role definitions from `opencode.json`; the active role definitions live in generated markdown agent files under `<configDir>/agents/*.md`.
 - Preserve the existing OpenCode config filename when possible: update `opencode.jsonc` when it is the only existing config file.
 - Do not overwrite the whole OpenCode config.

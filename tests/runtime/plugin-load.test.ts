@@ -1,8 +1,17 @@
 import { createBoundedLitePlugin } from "../../.opencode/plugins/bounded-lite.js";
 import { parseFrontmatter, writePlanArtifact } from "../../.opencode/lib/runtime/plan-artifact.js";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 async function execModelConfig(
   hooks: ReturnType<typeof createBoundedLitePlugin>,

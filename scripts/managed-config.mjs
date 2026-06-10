@@ -83,6 +83,17 @@ Workflow:
 Do not commit, push, publish, perform destructive actions, or write external/user-local config unless the user explicitly requested that action in the goal.
 If a safety, permission, missing-secret, impossible-condition, or explicit-authorization hard blocker prevents completion, stop and return a blocked report naming the blocker and the required authorization or condition.`;
 
+const MANAGED_MCP = {
+  "context7": {
+    "type": "local",
+    "command": ["npx", "-y", "@upstash/context7-mcp"]
+  },
+  "playwright": {
+    "type": "local",
+    "command": ["npx", "-y", "@playwright/mcp"]
+  }
+};
+
 export const MANAGED_CONFIG = {
   "$schema": "https://opencode.ai/config.json",
   "default_agent": "command-lead",
@@ -331,6 +342,7 @@ export const MANAGED_CONFIG = {
       "template": GO_COMMAND_TEMPLATE
     }
   },
+  "mcp": MANAGED_MCP,
   "permission": {
     "edit": {
       "*": "allow",
