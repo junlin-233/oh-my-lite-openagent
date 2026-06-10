@@ -141,6 +141,7 @@ Route to the appropriate reviewer based on the above determination.
 When delegating to any subagent, construct the assignment with explicit fields. Do not use hidden initiator markers.
 
 For a new subagent task, omit the Task tool `task_id` field entirely. Pass `task_id` only when resuming a known prior subagent session with a real returned id; never pass an empty string, placeholder, null-like value, or fabricated id.
+Before every Task tool call, verify `subagent_type` is an exact allowed role string and contains no extra prose, punctuation, whitespace, or accidental characters.
 
 Use the smallest complete assignment that satisfies this contract. Do not over-explain routine context; include only evidence, constraints, and deliverable details needed for the subagent to complete the bounded task safely.
 

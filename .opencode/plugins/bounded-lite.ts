@@ -37,11 +37,9 @@ import {
   applyLiteTaskLeadProfileModelConfig,
   applyLiteTaskLeadProfileReasoningEffortConfig,
   createDefaultLiteConfig,
-  defaultRoleReasoningEffort,
   LITE_CONFIG_FILE,
   migrateLiteConfigFromOpenCodeConfig,
   readLiteConfig,
-  resolveSupportedReasoningEffort,
   type LiteOpenAgentConfig,
   withLiteConfigAppliedToOpenCodeConfig,
 } from "../lib/runtime/lite-config.js";
@@ -351,7 +349,6 @@ async function writeLiteConfigFile(liteConfig: LiteOpenAgentConfig, configDir?: 
 
 async function updateGeneratedAgentMarkdownFiles(
   liteConfig: LiteOpenAgentConfig,
-  models: ReturnType<typeof listProviderModels>,
   configDir?: string,
 ): Promise<string[]> {
   const directory = defaultConfigDir(configDir);
@@ -368,18 +365,9 @@ async function updateGeneratedAgentMarkdownFiles(
       if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") throw error;
     }
     const model = liteConfig.roleModels[role.name];
-    const modelInfo = model ? models.find((item) => item.id === model) ?? model : undefined;
-    const requestedReasoning = liteConfig.roleReasoningEffort[role.name];
-    const effectiveReasoning = requestedReasoning
-      ? resolveSupportedReasoningEffort({
-        ...(modelInfo ? { model: modelInfo } : {}),
-        requested: requestedReasoning,
-        fallback: defaultRoleReasoningEffort(role.name),
-      })
-      : undefined;
     const nextContent = upsertMarkdownFrontmatter(content, {
       ...(model ? { model } : {}),
-      ...(effectiveReasoning ? { reasoningEffort: effectiveReasoning } : {}),
+      reasoningEffort: undefined,
     });
     await writeFile(`${filePath}.bak`, content);
     await writeFile(filePath, nextContent);
@@ -389,15 +377,17 @@ async function updateGeneratedAgentMarkdownFiles(
   return updated;
 }
 
-function upsertMarkdownFrontmatter(content: string, updates: Record<string, string>): string {
+function upsertMarkdownFrontmatter(content: string, updates: Record<string, string | undefined>): string {
   const match = content.match(/^---\n([\s\S]*?)\n---\n?/);
   const body = match ? content.slice(match[0].length) : content;
   const frontmatter = match?.[1] ?? "";
+  const updateKeys = new Set(Object.keys(updates));
   const lines = frontmatter.split("\n").filter((line) => {
     const key = line.split(":", 1)[0]?.trim();
-    return key !== "model" && key !== "reasoningEffort";
+    return key ? !updateKeys.has(key) : true;
   });
   for (const [key, value] of Object.entries(updates)) {
+    if (!value) continue;
     lines.push(`${key}: ${yamlScalar(value)}`);
   }
   return `---\n${lines.join("\n")}\n---\n\n${body.replace(/^\n+/, "")}`;
@@ -889,7 +879,7 @@ If no provider models are found, tell the user to configure or connect OpenCode 
               profileReasoningEffortAssignments,
             ) : { changed: [], skipped: [] };
             const liteConfigPath = await writeLiteConfigFile(liteConfig, options.configDir);
-            const updatedAgents = await updateGeneratedAgentMarkdownFiles(liteConfig, importedPool, options.configDir);
+            const updatedAgents = await updateGeneratedAgentMarkdownFiles(liteConfig, options.configDir);
             const updatedEffectiveConfig = withLiteConfigAppliedToOpenCodeConfig(
               withConfiguredTaskLeadProfiles(config, options),
               liteConfig,

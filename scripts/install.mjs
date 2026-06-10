@@ -893,9 +893,8 @@ function agentFrontmatter(agent, liteConfig, agentName) {
   const frontmatter = { ...agent };
   delete frontmatter.prompt;
   const model = liteConfig.roleModels[agentName];
-  const reasoningEffort = liteConfig.roleReasoningEffort[agentName];
   if (model) frontmatter.model = model;
-  if (reasoningEffort) frontmatter.reasoningEffort = reasoningEffort;
+  delete frontmatter.reasoningEffort;
   return yamlLines(frontmatter).join("\n");
 }
 
@@ -913,11 +912,12 @@ async function writeManagedAgentMarkdownFiles(rootDir, configDir, liteConfig, dr
     } else {
       promptText = `# ${agentName}\n`;
     }
-    const content = `---\n${agentFrontmatter(agent, liteConfig, agentName)}\n---\n\n${promptText.trimEnd()}\n`;
     const targetPath = path.join(targetAgentsDir, `${agentName}.md`);
+    const existingContent = await fileExists(targetPath) ? await readFile(targetPath, "utf8") : "";
+    const content = `---\n${agentFrontmatter(agent, liteConfig, agentName)}\n---\n\n${promptText.trimEnd()}\n`;
     if (!dryRun) {
-      if (await fileExists(targetPath)) {
-        await writeFile(`${targetPath}.bak`, await readFile(targetPath, "utf8"));
+      if (existingContent) {
+        await writeFile(`${targetPath}.bak`, existingContent);
       }
       await writeFile(targetPath, content);
     }

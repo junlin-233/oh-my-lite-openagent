@@ -1,4 +1,4 @@
-import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
@@ -125,6 +125,33 @@ describe("global installer JSONC config handling", () => {
       expect(writtenConfig.agent).toEqual({
         "custom-agent": { model: "openai/gpt-5.4" },
       });
+    } finally {
+      await rm(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it("removes generated agent reasoning effort over stale lite config", async () => {
+    const configDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-install-reasoning-"));
+
+    try {
+      const jsonPath = path.join(configDir, "opencode.json");
+      const litePath = path.join(configDir, "oh-my-lite-openagent.json");
+      const agentPath = path.join(configDir, "agents", "command-lead.md");
+      await writeFile(jsonPath, `${JSON.stringify({ provider: { openai: {} } })}\n`);
+      await writeFile(litePath, `${JSON.stringify({
+        schemaVersion: 1,
+        roleModels: {},
+        roleReasoningEffort: { "command-lead": "high" },
+        taskLeadProfiles: {},
+        modelPoolPolicy: { source: "all", allowCodexBackend: false },
+      })}\n`);
+      await mkdir(path.dirname(agentPath), { recursive: true });
+      await writeFile(agentPath, "---\nmode: primary\nreasoningEffort: low\n---\n\n# Command Lead\n");
+
+      await runInstaller(configDir);
+      const generatedCommandLead = await readFile(agentPath, "utf8");
+
+      expect(generatedCommandLead).not.toContain("reasoningEffort:");
     } finally {
       await rm(configDir, { recursive: true, force: true });
     }

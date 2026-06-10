@@ -197,7 +197,7 @@ describe("plugin safety", () => {
       expect(writtenLiteConfig.roleModels["command-lead"]).toBe("openai/gpt-5.4");
       expect(writtenLiteConfig.roleReasoningEffort["command-lead"]).toBe("max");
       expect(generatedAgent).toContain("model: openai/gpt-5.4");
-      expect(generatedAgent).toContain("reasoningEffort: high");
+      expect(generatedAgent).not.toContain("reasoningEffort:");
       expect(await pathExists(path.join(configDir, "opencode.json"))).toBe(false);
       expect(await pathExists(`${liteConfigPath}.bak`)).toBe(true);
     } finally {
@@ -205,7 +205,7 @@ describe("plugin safety", () => {
     }
   });
 
-  it("does not persist default reasoning effort when only model assignments are applied", async () => {
+  it("removes generated agent reasoning effort when only model assignments are applied", async () => {
     const configDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-model-only-"));
 
     try {
@@ -239,6 +239,51 @@ describe("plugin safety", () => {
 
       expect(writtenLiteConfig.roleModels["command-lead"]).toBe("openai/gpt-5.4");
       expect(writtenLiteConfig.roleReasoningEffort["command-lead"]).toBeUndefined();
+      expect(generatedAgent).toContain("model: openai/gpt-5.4");
+      expect(generatedAgent).not.toContain("reasoningEffort:");
+    } finally {
+      await rm(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it("removes stale generated agent reasoning effort on model-only apply", async () => {
+    const configDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-stale-reasoning-"));
+
+    try {
+      const jsonPath = path.join(configDir, "opencode.json");
+      await writeFile(jsonPath, `${JSON.stringify({ agent: { "command-lead": {} } })}\n`);
+      await writeFile(path.join(configDir, "oh-my-lite-openagent.json"), `${JSON.stringify({
+        schemaVersion: 1,
+        roleModels: {},
+        roleReasoningEffort: { "command-lead": "high" },
+        taskLeadProfiles: {},
+        modelPoolPolicy: { source: "all", allowCodexBackend: false },
+      })}\n`);
+      const agentsDir = path.join(configDir, "agents");
+      await mkdir(agentsDir, { recursive: true });
+      await writeFile(
+        path.join(agentsDir, "command-lead.md"),
+        "---\nmode: primary\nreasoningEffort: low\n---\n\n# Command Lead\n",
+      );
+
+      const hooks = await createBoundedLitePlugin(
+        { directory: process.cwd() },
+        { configDir },
+      );
+      await hooks.tool?.bounded_lite_model_config?.execute(
+        {
+          action: "apply",
+          assignments: { "command-lead": "openai/gpt-5.4" },
+          allowUnavailableModels: true,
+        },
+        {
+          directory: process.cwd(),
+          client: {},
+        },
+      );
+
+      const generatedAgent = await readFile(path.join(agentsDir, "command-lead.md"), "utf8");
+
       expect(generatedAgent).toContain("model: openai/gpt-5.4");
       expect(generatedAgent).not.toContain("reasoningEffort:");
     } finally {
