@@ -11,6 +11,7 @@ const config = managedConfigModule.MANAGED_CONFIG as {
   model?: unknown;
   small_model?: unknown;
   command?: Record<string, { agent?: string; template?: string; description?: string }>;
+  mcp?: Record<string, { type?: string; command?: string[] }>;
   agent: Record<
     string,
     {
@@ -71,6 +72,17 @@ describe("OpenCode agent topology", () => {
     expect(config.command?.go?.template).toContain("continue until verification and acceptance criteria succeed");
     expect(config.command?.go?.template).toContain("Do not commit, push, publish");
     expect(config.command?.go?.template).toContain("hard blocker");
+  });
+
+  it("registers zero-secret managed MCP defaults", () => {
+    expect(config.mcp?.context7).toEqual({
+      type: "local",
+      command: ["npx", "-y", "@upstash/context7-mcp"],
+    });
+    expect(config.mcp?.playwright).toEqual({
+      type: "local",
+      command: ["npx", "-y", "@playwright/mcp"],
+    });
   });
 
   it("registers eight bounded roles plus disabled built-in overrides", () => {
@@ -158,6 +170,23 @@ describe("OpenCode agent topology", () => {
     }
   });
 
+  it("prevents empty task_id delegation crashes in delegating role prompts", () => {
+    const delegatingRoles = [
+      "command-lead",
+      "plan-builder",
+      "deep-plan-builder",
+      "task-lead",
+      "plan-review",
+      "result-review",
+    ];
+
+    for (const roleName of delegatingRoles) {
+      const promptText = readPrompt(roleName);
+      expect(promptText, roleName).toContain("omit the Task tool `task_id` field entirely");
+      expect(promptText, roleName).toContain("never pass an empty string, placeholder, null-like value, or fabricated id");
+    }
+  });
+
   it("keeps Command Lead delegation assignments explicit and bounded", () => {
     const promptText = readPrompt("command-lead");
     const requiredFields = [
@@ -179,6 +208,8 @@ describe("OpenCode agent topology", () => {
     }
 
     expect(promptText).toContain("Do not use hidden initiator markers");
+    expect(promptText).toContain("omit the Task tool `task_id` field entirely");
+    expect(promptText).toContain("never pass an empty string, placeholder, null-like value, or fabricated id");
     expect(promptText).toContain("Use the smallest complete assignment");
     expect(promptText).toContain("Do not over-explain routine context");
     expect(promptText).toContain("Do not perform whole-repo unbounded search");

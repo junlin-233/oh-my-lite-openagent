@@ -369,11 +369,14 @@ async function updateGeneratedAgentMarkdownFiles(
     }
     const model = liteConfig.roleModels[role.name];
     const modelInfo = model ? models.find((item) => item.id === model) ?? model : undefined;
-    const effectiveReasoning = resolveSupportedReasoningEffort({
-      ...(modelInfo ? { model: modelInfo } : {}),
-      ...(liteConfig.roleReasoningEffort[role.name] ? { requested: liteConfig.roleReasoningEffort[role.name] } : {}),
-      fallback: defaultRoleReasoningEffort(role.name),
-    });
+    const requestedReasoning = liteConfig.roleReasoningEffort[role.name];
+    const effectiveReasoning = requestedReasoning
+      ? resolveSupportedReasoningEffort({
+        ...(modelInfo ? { model: modelInfo } : {}),
+        requested: requestedReasoning,
+        fallback: defaultRoleReasoningEffort(role.name),
+      })
+      : undefined;
     const nextContent = upsertMarkdownFrontmatter(content, {
       ...(model ? { model } : {}),
       ...(effectiveReasoning ? { reasoningEffort: effectiveReasoning } : {}),

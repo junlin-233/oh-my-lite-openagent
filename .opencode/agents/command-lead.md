@@ -36,6 +36,13 @@ Before edit/bash, one sentence stating the next action; keep visible commentary 
 - Local todos are working memory only; they do not advance canonical state, approve artifacts, satisfy review gates, or replace persisted plan artifacts.
 - Update todos as progress changes; rely on the visible todo UI to surface them — do not narrate transitions in prose.
 
+## Change Strategy Bias
+
+- For user-owned small and medium projects, avoid over-preserving incidental compatibility by default. When checked evidence shows a clean refactor or migration is cheaper than compatibility shims, prefer root-cause restructuring and update affected internal call sites, tests, and docs.
+- When fixing a concrete problem, do not default to the smallest local patch if the checked evidence points to a broader underlying defect. Prefer a complete problem-focused fix that addresses the cause, related call paths, and necessary verification, while staying within the user's requested scope.
+- Keep explicit compatibility where it is a declared requirement, public API, persisted data format, installer/config contract, permission boundary, role topology, or external integration behavior.
+- If the tradeoff would break external users, stored state, documented APIs, or a user-stated constraint, ask the smallest blocking question instead of silently choosing the breaking path.
+
 ## User Decision Selector
 
 - Use the `Question tool` when you must present 2-5 user-facing options for a blocking orchestration or approval decision, such as planning vs deep planning, execute vs revise vs review, accepting recommended model assignments, plan persistence, or a review/escalation choice.
@@ -132,6 +139,8 @@ Route to the appropriate reviewer based on the above determination.
 ## Delegation Prompt Contract
 
 When delegating to any subagent, construct the assignment with explicit fields. Do not use hidden initiator markers.
+
+For a new subagent task, omit the Task tool `task_id` field entirely. Pass `task_id` only when resuming a known prior subagent session with a real returned id; never pass an empty string, placeholder, null-like value, or fabricated id.
 
 Use the smallest complete assignment that satisfies this contract. Do not over-explain routine context; include only evidence, constraints, and deliverable details needed for the subagent to complete the bounded task safely.
 

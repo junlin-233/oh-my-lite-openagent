@@ -17,11 +17,12 @@ Tired of complicated agent frameworks? Try Oh My Lite! It stays lightweight whil
 - Visible decision-making roles (`command-lead`, `plan-builder`, and `deep-plan-builder`) may use OpenCode's `Question tool` for bounded blocking choices; hidden internal roles stay out of the user-facing decision loop.
 - `plan-builder` and `deep-plan-builder` include Decision Selector Discipline so blocking choices are presented as 2-5 concrete options, with `Custom / other` available when user-supplied input is valid.
 - `result-review` is optional and user-selectable. It reviews Command Lead execution summaries/final integrated results, not Task Lead child task returns.
-- Delegating roles use an explicit assignment template: `TASK`, `EXPECTED OUTCOME`, `ROLE`, `SCOPE`, `UPSTREAM EVIDENCE`, `REQUIRED TOOLS`, `MUST DO`, `MUST NOT DO`, `CONTEXT`, `DELIVERABLE FORMAT`, and `FAILURE RETURN`.
+- Delegating roles use an explicit assignment template: `TASK`, `EXPECTED OUTCOME`, `ROLE`, `SCOPE`, `UPSTREAM EVIDENCE`, `REQUIRED TOOLS`, `MUST DO`, `MUST NOT DO`, `CONTEXT`, `DELIVERABLE FORMAT`, and `FAILURE RETURN`; new subagent tasks omit `task_id` entirely.
 - Durable plan artifacts are written to `.liteagent/plans/`, with an append-only index at `.liteagent/plan-index.jsonl`.
+- For user-owned small and medium projects, Command Lead favors root-cause refactors and complete problem-focused fixes over incidental compatibility shims or narrow local patches, while preserving public APIs, persisted formats, installer/config contracts, permission boundaries, role topology, external integrations, and user-stated constraints.
 - Provider-compatible async plugin tools: `bounded_lite_route`, `bounded_lite_plan_dag`, `bounded_lite_plan_readiness`, `bounded_lite_plan_artifact`, `bounded_lite_background`, `bounded_lite_runtime_profile`, `bounded_lite_model_config`.
 - OpenCode's native `build` and `plan` modes are hidden and disabled.
-- The global installer preserves your existing model, provider, API key, plugin, and custom agent settings.
+- The global installer preserves your existing model, provider, API key, plugin, MCP, and custom agent settings.
 
 ## AI Installation
 
@@ -102,7 +103,11 @@ agents/*.md
 oh-my-lite-openagent.json
 ```
 
-Then it merges only the plugin/command bootstrap fragment from `scripts/managed-config.mjs` into the OpenCode global config. Role definitions are generated as OpenCode markdown agents under `<configDir>/agents/*.md`; role model and reasoning settings live in `<configDir>/oh-my-lite-openagent.json`. The installer removes stale managed role definitions from `opencode.json` so the global config and markdown agent files do not carry two copies of the same managed roles; custom agents are preserved. The package no longer ships a root `opencode.json`; provider, API key, unrelated plugin, and custom agent settings belong to the user's own OpenCode config. If the target config directory only has `opencode.jsonc`, the installer reads and writes `opencode.jsonc` and does not create an extra `opencode.json`; if both `opencode.json` and `opencode.jsonc` exist, `opencode.json` is treated as the active merge target.
+Then it merges only the plugin/command/MCP bootstrap fragment from `scripts/managed-config.mjs` into the OpenCode global config. Role definitions are generated as OpenCode markdown agents under `<configDir>/agents/*.md`; role model and reasoning settings live in `<configDir>/oh-my-lite-openagent.json`. The installer removes stale managed role definitions from `opencode.json` so the global config and markdown agent files do not carry two copies of the same managed roles; custom agents are preserved. The package no longer ships a root `opencode.json`; provider, API key, unrelated plugin, MCP, and custom agent settings belong to the user's own OpenCode config. If the target config directory only has `opencode.jsonc`, the installer reads and writes `opencode.jsonc` and does not create an extra `opencode.json`; if both `opencode.json` and `opencode.jsonc` exist, `opencode.json` is treated as the active merge target.
+
+By default, the installer backfills zero-secret managed MCP servers for `context7` (`npx -y @upstash/context7-mcp`) and `playwright` (`npx -y @playwright/mcp`). Existing user MCP servers are preserved, and an existing user-defined `context7` or `playwright` entry wins over the managed default. To skip these managed MCP defaults, run `npm run install:opencode -- --no-managed-mcp` or `node scripts/install.mjs --no-managed-mcp`.
+
+Generated `<configDir>/agents/*.md` files are managed outputs. Do not hand-edit them for durable preferences; use `/agent-models`, OpenCode configuration, or rerun the installer so regeneration keeps the intended state.
 
 The installer writes `.bak` backups only for target files that already exist, such as an existing `opencode.json`/`opencode.jsonc` or existing `<configDir>/agents/*.md`; first-time files do not get empty backups.
 
@@ -210,7 +215,7 @@ bounded_lite_model_config({ action: "apply", assignments: { "command-lead": "ope
 
 The command writes role model settings to `<configDir>/oh-my-lite-openagent.json` and regenerates `<configDir>/agents/*.md` so OpenCode can load the selected model from markdown agent frontmatter. It does not write `agent.<role>.model` into `opencode.json`. By default, it rejects models outside the imported pool to prevent AI from inventing provider/model IDs.
 
-You can also configure reasoning effort. Oh My Lite accepts common values and aliases such as `minimal`, `low`, `medium`, `high`, `xhigh`, `extra-high`, `max`, and `maximum`. Invalid values fall back to the role/profile default; unsupported provider/model values are downgraded to a safe supported value or omitted so the provider uses its default.
+You can also configure reasoning effort explicitly. Oh My Lite treats reasoning effort as a user preference: `action: "auto"` only previews recommendations, model-only `action: "apply"` does not persist a default reasoning effort, and existing OpenCode agent/session choices such as `Ctrl+T` stay in control unless you pass `reasoningEffortAssignments`. Oh My Lite accepts common values and aliases such as `minimal`, `low`, `medium`, `high`, `xhigh`, `extra-high`, `max`, and `maximum`. Invalid values fall back to the role/profile default; unsupported provider/model values are downgraded to a safe supported value or omitted so the provider uses its default.
 
 ```text
 bounded_lite_model_config({
@@ -227,6 +232,8 @@ bounded_lite_model_config({ action: "apply", taskLeadProfileAssignments: { "code
 ```
 
 Built-in profiles include `quick`, `code`, `research`, `writing`, `visual`, `deep`, and `risk-high`.
+
+When delegating to hidden subagents, new Task tool calls must omit `task_id` entirely. Pass `task_id` only to resume a real prior subagent session returned by the Task tool; never pass an empty string, placeholder, null-like value, or fabricated id.
 
 You can also write role models and profile models together:
 

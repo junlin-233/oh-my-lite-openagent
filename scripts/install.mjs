@@ -14,6 +14,10 @@ const MANAGED_COMMAND_NAMES = new Set([
   "agent-models",
   "Character-model",
 ]);
+const MANAGED_MCP_NAMES = new Set([
+  "context7",
+  "playwright",
+]);
 const BUILTIN_AGENT_OVERRIDES = new Set([
   "build",
   "plan",
@@ -457,6 +461,11 @@ function parseArgs(argv) {
       continue;
     }
 
+    if (arg === "--no-managed-mcp") {
+      args.managedMcp = false;
+      continue;
+    }
+
     if (arg === "--config-dir") {
       const value = argv[index + 1];
       if (!value) throw new Error("--config-dir requires a path");
@@ -760,7 +769,20 @@ function mergePermission(existingPermission, sourcePermission) {
   };
 }
 
-function mergeConfig(existingConfig, sourceConfig, configDir) {
+function mergeMcp(existingMcp, sourceMcp, managedMcp = true) {
+  if (!managedMcp || !isRecord(sourceMcp)) return existingMcp;
+  const managedSourceMcp = Object.fromEntries(
+    Object.entries(sourceMcp).filter(([serverName]) => MANAGED_MCP_NAMES.has(serverName)),
+  );
+  if (!isRecord(existingMcp)) return managedSourceMcp;
+
+  return {
+    ...managedSourceMcp,
+    ...existingMcp,
+  };
+}
+
+function mergeConfig(existingConfig, sourceConfig, configDir, options = {}) {
   const legacyTaskLeadProfiles = isRecord(existingConfig.taskLeadProfiles)
     ? existingConfig.taskLeadProfiles
     : undefined;
@@ -795,6 +817,7 @@ function mergeConfig(existingConfig, sourceConfig, configDir) {
     ...existingWithoutLegacyProfiles,
     $schema: existingConfig.$schema ?? sourceConfig.$schema,
     plugin: plugins,
+    mcp: mergeMcp(existingConfig.mcp, sourceConfig.mcp, options.managedMcp),
     default_agent: sourceConfig.default_agent,
     permission: mergePermission(existingConfig.permission, sourceConfig.permission),
     command: {
@@ -933,6 +956,7 @@ async function prepareInstallContext(options) {
     existingLiteConfig,
     dryRun: Boolean(options.dryRun),
     interactive: Boolean(options.interactive),
+    managedMcp: options.managedMcp !== false,
     sourceOpenCodeDir: path.join(rootDir, ".opencode"),
     targetOpenCodeDir: path.join(configDir, ".opencode"),
   };
@@ -941,7 +965,9 @@ async function prepareInstallContext(options) {
 function mergeAll(context) {
   return {
     liteConfig: mergeLiteConfig(context.existingLiteConfig, context.existingConfig),
-    mergedConfig: mergeConfig(context.existingConfig, MANAGED_CONFIG, context.configDir),
+    mergedConfig: mergeConfig(context.existingConfig, MANAGED_CONFIG, context.configDir, {
+      managedMcp: context.managedMcp,
+    }),
   };
 }
 

@@ -1,5 +1,5 @@
 import { createBoundedLitePlugin } from "../../.opencode/plugins/bounded-lite.js";
-import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -200,6 +200,47 @@ describe("plugin safety", () => {
       expect(generatedAgent).toContain("reasoningEffort: high");
       expect(await pathExists(path.join(configDir, "opencode.json"))).toBe(false);
       expect(await pathExists(`${liteConfigPath}.bak`)).toBe(true);
+    } finally {
+      await rm(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not persist default reasoning effort when only model assignments are applied", async () => {
+    const configDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-model-only-"));
+
+    try {
+      const jsonPath = path.join(configDir, "opencode.json");
+      await writeFile(jsonPath, `${JSON.stringify({ agent: { "command-lead": {} } })}\n`);
+      const agentsDir = path.join(configDir, "agents");
+      await mkdir(agentsDir, { recursive: true });
+      await writeFile(
+        path.join(agentsDir, "command-lead.md"),
+        "---\nmode: primary\nreasoningEffort: high\n---\n\n# Command Lead\n",
+      );
+
+      const hooks = await createBoundedLitePlugin(
+        { directory: process.cwd() },
+        { configDir },
+      );
+      await hooks.tool?.bounded_lite_model_config?.execute(
+        {
+          action: "apply",
+          assignments: { "command-lead": "openai/gpt-5.4" },
+          allowUnavailableModels: true,
+        },
+        {
+          directory: process.cwd(),
+          client: {},
+        },
+      );
+
+      const generatedAgent = await readFile(path.join(agentsDir, "command-lead.md"), "utf8");
+      const writtenLiteConfig = JSON.parse(await readFile(path.join(configDir, "oh-my-lite-openagent.json"), "utf8"));
+
+      expect(writtenLiteConfig.roleModels["command-lead"]).toBe("openai/gpt-5.4");
+      expect(writtenLiteConfig.roleReasoningEffort["command-lead"]).toBeUndefined();
+      expect(generatedAgent).toContain("model: openai/gpt-5.4");
+      expect(generatedAgent).not.toContain("reasoningEffort:");
     } finally {
       await rm(configDir, { recursive: true, force: true });
     }

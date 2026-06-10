@@ -23,6 +23,7 @@ import {
   createDefaultLiteConfig,
   normalizeLiteReasoningEffort,
   resolveSupportedReasoningEffort,
+  withLiteConfigAppliedToOpenCodeConfig,
 } from "../../.opencode/lib/runtime/lite-config.js";
 
 describe("role model configuration", () => {
@@ -419,6 +420,28 @@ describe("role model configuration", () => {
     ]);
     expect(liteConfig.roleReasoningEffort["command-lead"]).toBe("max");
     expect(liteConfig.roleReasoningEffort.explore).toBe("low");
+  });
+
+  it("keeps explicit OpenCode reasoning effort ahead of lite config defaults", () => {
+    const liteConfig = createDefaultLiteConfig();
+    liteConfig.roleModels["command-lead"] = "openai/gpt-5.4";
+    liteConfig.roleReasoningEffort["command-lead"] = "max";
+
+    const effective = withLiteConfigAppliedToOpenCodeConfig({
+      agent: {
+        "command-lead": {
+          model: "openai/gpt-5",
+          reasoningEffort: "medium",
+        },
+      },
+    }, liteConfig);
+
+    expect(effective.agent).toMatchObject({
+      "command-lead": {
+        model: "openai/gpt-5.4",
+        reasoningEffort: "medium",
+      },
+    });
   });
 
   it("downgrades unsupported reasoning effort to a provider-safe value", () => {

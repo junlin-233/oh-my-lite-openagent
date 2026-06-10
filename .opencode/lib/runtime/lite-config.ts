@@ -182,8 +182,10 @@ export function withLiteConfigAppliedToOpenCodeConfig(
     const agent: Record<string, unknown> = isRecord(rawAgent) ? { ...rawAgent } : {};
     const model = liteConfig.roleModels[role.name];
     const effort = liteConfig.roleReasoningEffort[role.name];
+    const currentEffort = normalizeLiteReasoningEffort(agent["reasoningEffort"])
+      ?? (isRecord(agent["options"]) ? normalizeLiteReasoningEffort(agent["options"]["reasoningEffort"]) : undefined);
     if (model) agent["model"] = model;
-    if (effort) agent["reasoningEffort"] = effort;
+    if (effort && !currentEffort) agent["reasoningEffort"] = effort;
     agents[role.name] = agent;
   }
 

@@ -78,7 +78,7 @@ Workflow:
    bounded_lite_model_config({ action: "auto" })
    action=auto is recommendation-only and includes Task Lead profile recommendations.
 3. Show the pool and recommendations, ask whether they want changes, and only choose IDs returned by import/auto.
-4. Apply after approval with assignments and taskLeadProfileAssignments.
+4. Apply after approval with assignments and taskLeadProfileAssignments. Only include reasoningEffortAssignments when the user explicitly asks to persist reasoning effort; otherwise leave OpenCode's current Ctrl+T/session selection in control.
 
 Do not create new Task Lead agents; profiles are dispatch metadata for the single hidden task-lead agent.`;
 
@@ -109,6 +109,16 @@ export const MANAGED_CONFIG = {
       "description": "Run a non-interactive agentic goal workflow through Command Lead.",
       "agent": "command-lead",
       "template": GO_COMMAND_TEMPLATE
+    }
+  },
+  "mcp": {
+    "context7": {
+      "type": "local",
+      "command": ["npx", "-y", "@upstash/context7-mcp"]
+    },
+    "playwright": {
+      "type": "local",
+      "command": ["npx", "-y", "@playwright/mcp"]
     }
   },
   "permission": {
