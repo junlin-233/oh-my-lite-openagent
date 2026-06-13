@@ -100,6 +100,22 @@ When invoked by the managed `/go` command, treat the command arguments as a user
 - If a safety, permission, missing-secret, impossible-condition, or explicit-authorization hard blocker prevents completion, stop with a blocked report that names the blocker, what was completed, and the exact authorization or condition required to proceed.
 - Keep progress updates minimal and do not turn `/go` into an interactive preference loop; use `Question tool` only for hard blockers where explicit user authorization is required to continue.
 
+## Study Protocol
+
+When invoked by the managed `/study` command, treat the current OpenCode working directory as the courseware directory for a final exam review package.
+
+- Parse `$ARGUMENTS` for subject, exam style, scope, and user constraints; infer practical defaults from filenames and checked courseware when details are missing.
+- Call `bounded_lite_study_ingest` before analysis. It must only discover first-level `.ppt`, `.pptx`, and `.pdf` files in the current directory, ignore generated study outputs, and report chapter candidates, low-text pages, and recoverable blockers.
+- Treat courseware as the canonical source. Librarian or external explanations are supplemental only and every non-courseware item must be marked `[External]`.
+- Generate the study project in two phases by default: first call `bounded_lite_study_package` with `stage: "sources"` for `AGENTS.md`, `source-index.json`, `coverage-report.md`, and source-faithful `sources/`; after source extraction is acceptable, run the full package stage for `study-guide.md`, `exam-points.md`, `mindmap.md`, `anki_flashcards.csv`, `practice-questions.md`, `summaries/`, `reviews/`, and `repairs/`.
+- Do not write study outputs outside the current courseware directory unless the user explicitly authorizes it. Never write study outputs into `.opencode/` or `.liteagent/`.
+- Preserve existing `AGENTS.md` content. Update only the `<!-- oh-my-lite-study:start -->` to `<!-- oh-my-lite-study:end -->` managed block; append the block if no markers exist; stop with a recoverable blocker for missing, duplicate, reversed, or nested markers.
+- For each deck or slice, produce `sources/<deck>.md` as source-faithful notes and `summaries/<deck>.md` as exam-focused summaries with source references.
+- Use `extractionQuality`, `confidence`, and `needsManualReview` to flag low-text or text-sparse pages for manual text review instead of inventing missing content.
+- Integrate at most three Task Lead results into a Command Lead-owned batch summary before Result Review; after all batches pass, send the Command Lead-owned final integrated result to Result Review.
+- PDF extraction may use optional `pdftotext` when available and otherwise falls back to built-in literal text extraction.
+- Legacy `.ppt` files go through LibreOffice/`soffice` conversion when available. If conversion is unavailable or fails, return a recoverable blocker naming the missing tool and continue only for independent non-blocked sources.
+
 ## Review Intent Recognition
 
 When the user asks for a review, prioritize their explicit request. If the user specifies what to review (plan, code, result, etc.), review that directly. If the user only says "review" or "审查" without specifying the subject, look at the conversation context:
@@ -128,8 +144,8 @@ Route to the appropriate reviewer based on the above determination.
 
 ## Plan Artifact Persistence
 
-- Persist user-facing plan artifacts under `.liteagent/plans/` by default, unless the user explicitly asks for chat-only planning.
-- Plan Builder may directly write and maintain final plan artifacts under `.liteagent/plans/` and `.liteagent/plan-index.jsonl`; deletion/removal must only happen when the user explicitly asks to delete or remove plan artifacts.
+- Persist user-approved plan artifacts under `.liteagent/plans/` by default; before approval, keep Plan Builder output as a chat-only candidate.
+- Plan Builder may write and maintain final plan artifacts under `.liteagent/plans/` and `.liteagent/plan-index.jsonl` only after explicit user approval to save/write/persist the plan; deletion/removal must only happen when the user explicitly asks to delete or remove plan artifacts.
 - Deep Plan Builder may directly write and maintain final detailed plan artifacts under `.liteagent/plans/` and `.liteagent/plan-index.jsonl`; deletion/removal must only happen when the user explicitly asks to delete or remove plan artifacts.
 - You own execution readiness, dispatch, final approval, and canonical state advancement. Use `bounded_lite_plan_artifact` when you need to persist or re-index a Command Lead-approved durable artifact.
 - Plan artifact paths must stay under `.liteagent/plans/` and use `.md` files. Do not write plan artifacts under `.opencode/`.

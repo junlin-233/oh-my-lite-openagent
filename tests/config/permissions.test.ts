@@ -56,8 +56,12 @@ describe("delegation boundaries", () => {
     expect(taskRules("result-review")).toEqual({ "*": "deny", explore: "allow" });
   });
 
-  it("allows Plan Builder to write plan artifacts directly", () => {
-    expect(config.agent["plan-builder"]?.permission?.edit).toEqual({ "*": "allow" });
+  it("limits planners to approved .liteagent plan artifact writes", () => {
+    expect(config.agent["plan-builder"]?.permission?.edit).toEqual({
+      "*": "deny",
+      ".liteagent/**": "allow",
+      "**/.liteagent/**": "allow",
+    });
     expect(config.agent["deep-plan-builder"]?.permission?.edit).toEqual({
       "*": "deny",
       ".liteagent/**": "allow",

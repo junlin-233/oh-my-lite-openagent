@@ -45,6 +45,8 @@ describe("plugin safety", () => {
     expect(toolNames).toContain("bounded_lite_plan_dag");
     expect(toolNames).toContain("bounded_lite_plan_readiness");
     expect(toolNames).toContain("bounded_lite_plan_artifact");
+    expect(toolNames).toContain("bounded_lite_study_ingest");
+    expect(toolNames).toContain("bounded_lite_study_package");
     expect(toolNames.every((toolName) => toolName.startsWith("bounded_lite_"))).toBe(true);
     expect(toolNames.every((toolName) => /^[a-zA-Z0-9_-]+$/.test(toolName))).toBe(true);
   });
@@ -288,6 +290,218 @@ describe("plugin safety", () => {
       expect(generatedAgent).not.toContain("reasoningEffort:");
     } finally {
       await rm(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it("ingests only first-level study courseware and reports generated outputs", async () => {
+    const coursewareDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-study-"));
+
+    try {
+      await writeFile(
+        path.join(coursewareDir, "01-database.pdf"),
+        "%PDF-1.4\n1 0 obj << /Type /Page >> endobj\nBT (Chapter 1 Database Systems covers relational models normalization SQL transactions indexing recovery and exam review checkpoints for final preparation.) Tj ET\n%%EOF\n",
+      );
+      await writeFile(path.join(coursewareDir, "study-guide.md"), "generated\n");
+      await mkdir(path.join(coursewareDir, "nested"));
+      await writeFile(path.join(coursewareDir, "nested", "ignored.pdf"), "BT (Nested) Tj ET\n");
+      await mkdir(path.join(coursewareDir, "sources"));
+
+      const hooks = await createBoundedLitePlugin({ directory: coursewareDir });
+      const output = await hooks.tool?.bounded_lite_study_ingest?.execute(
+        {},
+        { directory: coursewareDir },
+      );
+      const result = JSON.parse(String(output));
+
+      expect(result.discoveredFiles).toEqual(["01-database.pdf"]);
+      expect(result.ignoredGeneratedOutputs).toEqual(expect.arrayContaining(["study-guide.md", "sources/"]));
+      expect(result.sources[0]).toMatchObject({
+        filename: "01-database.pdf",
+        extension: ".pdf",
+        status: "ok",
+      });
+      expect(result.sources[0].extraction).toMatchObject({
+        method: expect.any(String),
+        quality: expect.stringMatching(/^(high|medium)$/),
+        confidence: expect.any(Number),
+        needsManualReview: false,
+      });
+      expect(result.sources[0].slides[0]).toMatchObject({
+        extractionMethod: expect.any(String),
+        extractionQuality: expect.stringMatching(/^(high|medium)$/),
+        confidence: expect.any(Number),
+        needsManualReview: false,
+      });
+      expect(result.sources[0].slides[0].text).toContain("Chapter 1 Database Systems");
+      expect(result.chapterCandidates.some((candidate: string) => candidate.includes("Chapter 1 Database Systems"))).toBe(true);
+      expect(result.policy.recursive).toBe(false);
+      expect(result.policy.externalLabelRequired).toBe("[External]");
+    } finally {
+      await rm(coursewareDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns a recoverable blocker for legacy ppt when soffice is unavailable", async () => {
+    const coursewareDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-study-ppt-"));
+    const originalPath = process.env.PATH;
+
+    try {
+      process.env.PATH = "";
+      await writeFile(path.join(coursewareDir, "legacy.ppt"), "legacy binary placeholder\n");
+
+      const hooks = await createBoundedLitePlugin({ directory: coursewareDir });
+      const output = await hooks.tool?.bounded_lite_study_ingest?.execute(
+        {},
+        { directory: coursewareDir },
+      );
+      const result = JSON.parse(String(output));
+
+      expect(result.sources[0]).toMatchObject({
+        filename: "legacy.ppt",
+        extension: ".ppt",
+        status: "blocked",
+      });
+      expect(result.sources[0].extraction).toMatchObject({
+        method: "ppt-soffice-missing",
+        quality: "blocked",
+        confidence: 0,
+        needsManualReview: true,
+      });
+      expect(result.recoverableBlockers[0]).toMatchObject({
+        file: "legacy.ppt",
+        recoverability: "recoverable",
+        requiredTool: "soffice",
+      });
+    } finally {
+      process.env.PATH = originalPath;
+      await rm(coursewareDir, { recursive: true, force: true });
+    }
+  });
+
+  it("generates a bounded current-directory study package", async () => {
+    const coursewareDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-study-package-"));
+
+    try {
+      await writeFile(
+        path.join(coursewareDir, "02-indexes.pdf"),
+        "%PDF-1.4\n1 0 obj << /Type /Page >> endobj\nBT (Chapter 2 Indexes covers B plus trees hash indexes clustered indexes selectivity query planning and common final exam mistakes.) Tj ET\n%%EOF\n",
+      );
+      await writeFile(path.join(coursewareDir, "AGENTS.md"), "# Course rules\n\nKeep this line.\n");
+
+      const hooks = await createBoundedLitePlugin({ directory: coursewareDir });
+      const output = await hooks.tool?.bounded_lite_study_package?.execute(
+        {},
+        { directory: coursewareDir },
+      );
+      const result = JSON.parse(String(output));
+      const agents = await readFile(path.join(coursewareDir, "AGENTS.md"), "utf8");
+      const sourceIndex = JSON.parse(await readFile(path.join(coursewareDir, "source-index.json"), "utf8"));
+
+      expect(result.status).toBe("ok");
+      expect(result.writtenFiles).toEqual(expect.arrayContaining([
+        "AGENTS.md",
+        "source-index.json",
+        "study-guide.md",
+        "exam-points.md",
+        "mindmap.md",
+        "anki_flashcards.csv",
+        "practice-questions.md",
+        "coverage-report.md",
+        "sources/02-indexes.md",
+        "summaries/02-indexes.md",
+      ]));
+      expect(agents).toContain("Keep this line.");
+      expect(agents).toContain("oh-my-lite-study:start");
+      expect(sourceIndex.discoveredFiles).toEqual(["02-indexes.pdf"]);
+      const summary = await readFile(path.join(coursewareDir, "summaries", "02-indexes.md"), "utf8");
+      expect(summary).toContain("Manual Text Review");
+      expect(summary).not.toContain("Visual Review");
+      expect(summary).not.toContain("visual-heavy");
+      const sourceNotes = await readFile(path.join(coursewareDir, "sources", "02-indexes.md"), "utf8");
+      expect(sourceNotes).not.toContain("visual review");
+    } finally {
+      await rm(coursewareDir, { recursive: true, force: true });
+    }
+  });
+
+  it("supports a source-only study package stage before full generation", async () => {
+    const coursewareDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-study-sources-"));
+
+    try {
+      await writeFile(
+        path.join(coursewareDir, "04-transactions.pdf"),
+        "%PDF-1.4\n1 0 obj << /Type /Page >> endobj\nBT (Chapter 4 Transactions covers ACID isolation schedules serializability locking logging recovery checkpoints and final exam practice.) Tj ET\n%%EOF\n",
+      );
+
+      const hooks = await createBoundedLitePlugin({ directory: coursewareDir });
+      const output = await hooks.tool?.bounded_lite_study_package?.execute(
+        { stage: "sources" },
+        { directory: coursewareDir },
+      );
+      const result = JSON.parse(String(output));
+
+      expect(result.stage).toBe("sources");
+      expect(result.writtenFiles).toEqual(expect.arrayContaining([
+        "AGENTS.md",
+        "source-index.json",
+        "coverage-report.md",
+        "sources/04-transactions.md",
+      ]));
+      expect(result.writtenFiles).not.toContain("study-guide.md");
+      expect(result.writtenFiles).not.toContain("summaries/04-transactions.md");
+      await expect(readFile(path.join(coursewareDir, "study-guide.md"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(coursewareDir, { recursive: true, force: true });
+    }
+  });
+
+  it("blocks study package generation for invalid AGENTS markers", async () => {
+    const coursewareDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-study-agents-"));
+
+    try {
+      await writeFile(path.join(coursewareDir, "slides.pdf"), "BT (Chapter 3 Recovery) Tj ET\n");
+      await writeFile(path.join(coursewareDir, "AGENTS.md"), "<!-- oh-my-lite-study:start -->\nmissing end\n");
+
+      const hooks = await createBoundedLitePlugin({ directory: coursewareDir });
+      const output = await hooks.tool?.bounded_lite_study_package?.execute(
+        {},
+        { directory: coursewareDir },
+      );
+      const result = JSON.parse(String(output));
+
+      expect(result.status).toBe("blocked");
+      expect(result.recoverableBlockers[0]).toMatchObject({
+        file: "AGENTS.md",
+        recoverability: "recoverable",
+      });
+    } finally {
+      await rm(coursewareDir, { recursive: true, force: true });
+    }
+  });
+
+  it("requires explicit authorization for study tools outside the current directory", async () => {
+    const baseDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-study-base-"));
+    const externalDir = await mkdtemp(path.join(os.tmpdir(), "omo-lite-study-external-"));
+
+    try {
+      await writeFile(path.join(externalDir, "external.pdf"), "BT (External) Tj ET\n");
+      const hooks = await createBoundedLitePlugin({ directory: baseDir });
+
+      await expect(hooks.tool?.bounded_lite_study_ingest?.execute(
+        { directory: externalDir },
+        { directory: baseDir },
+      )).rejects.toThrow("allowExternalDirectory=true");
+
+      const output = await hooks.tool?.bounded_lite_study_ingest?.execute(
+        { directory: externalDir, allowExternalDirectory: true },
+        { directory: baseDir },
+      );
+      const result = JSON.parse(String(output));
+
+      expect(result.discoveredFiles).toEqual(["external.pdf"]);
+    } finally {
+      await rm(baseDir, { recursive: true, force: true });
+      await rm(externalDir, { recursive: true, force: true });
     }
   });
 });

@@ -74,6 +74,25 @@ describe("OpenCode agent topology", () => {
     expect(config.command?.go?.template).toContain("hard blocker");
   });
 
+  it("registers a /study command for current-directory exam review packages", () => {
+    expect(config.command?.study).toMatchObject({
+      agent: "command-lead",
+    });
+    expect(config.command?.study?.description).toContain("final exam review project");
+    expect(config.command?.study?.template).toContain("$ARGUMENTS");
+    expect(config.command?.study?.template).toContain("bounded_lite_study_ingest");
+    expect(config.command?.study?.template).toContain("bounded_lite_study_package");
+    expect(config.command?.study?.template).toContain('stage="sources"');
+    expect(config.command?.study?.template).toContain("extractionQuality");
+    expect(config.command?.study?.template).toContain("pdftotext");
+    expect(config.command?.study?.template).toContain("current OpenCode working directory");
+    expect(config.command?.study?.template).toContain(".ppt, .pptx, and .pdf");
+    expect(config.command?.study?.template).toContain("[External]");
+    expect(config.command?.study?.template).toContain("AGENTS.md");
+    expect(config.command?.study?.template).toContain("oh-my-lite-study:start");
+    expect(config.command?.study?.template).toContain("not a new OpenCode mode or agent");
+  });
+
   it("registers zero-secret managed MCP defaults", () => {
     expect(config.mcp?.context7).toEqual({
       type: "local",
@@ -259,6 +278,25 @@ describe("OpenCode agent topology", () => {
     expect(promptText).toContain("escalate with the blockers");
   });
 
+  it("documents Study Protocol without adding modes or agents", () => {
+    const promptText = readPrompt("command-lead");
+
+    expect(promptText).toContain("## Study Protocol");
+    expect(promptText).toContain("bounded_lite_study_ingest");
+    expect(promptText).toContain("bounded_lite_study_package");
+    expect(promptText).toContain('stage: "sources"');
+    expect(promptText).toContain("extractionQuality");
+    expect(promptText).toContain("pdftotext");
+    expect(promptText).toContain("first-level `.ppt`, `.pptx`, and `.pdf`");
+    expect(promptText).toContain("courseware as the canonical source");
+    expect(promptText).toContain("[External]");
+    expect(promptText).toContain("source-index.json");
+    expect(promptText).toContain("anki_flashcards.csv");
+    expect(promptText).toContain("<!-- oh-my-lite-study:start -->");
+    expect(promptText).toContain("Command Lead-owned batch summary");
+    expect(promptText).toContain("LibreOffice/`soffice`");
+  });
+
   it("requires Command Lead Go Protocol to stay non-interactive and bounded", () => {
     const promptText = readPrompt("command-lead");
 
@@ -291,7 +329,8 @@ describe("OpenCode agent topology", () => {
     expect(promptText).toContain(".liteagent/plan-index.jsonl");
     expect(promptText).toContain("bounded_lite_plan_artifact");
     expect(promptText).toContain("Do not write plan artifacts under `.opencode/`");
-    expect(promptText).toContain("Plan Builder may directly write and maintain final plan artifacts");
+    expect(promptText).toContain("Persist user-approved plan artifacts");
+    expect(promptText).toContain("only after explicit user approval to save/write/persist the plan");
     expect(promptText).toContain("deletion/removal must only happen when the user explicitly asks");
   });
 
@@ -322,7 +361,10 @@ describe("OpenCode agent topology", () => {
     expect(promptText).toContain("must not be emitted as a final artifact");
     expect(promptText).toContain("recommended_plan_path");
     expect(promptText).toContain(".liteagent/plans/");
-    expect(promptText).toContain("write the final plan artifact yourself");
+    expect(promptText).toContain("chat-only candidate");
+    expect(promptText).toContain("lightweight overview card");
+    expect(promptText).toContain("outputs, workflow, scope, risks, verification");
+    expect(promptText).toContain("only after explicit user approval to save/write/persist the plan");
     expect(promptText).toContain(".liteagent/plan-index.jsonl");
     expect(promptText).toContain("Deleting plan artifact files or removing/changing index entries is allowed only when the user explicitly asks");
     expect(promptText).toContain("does not grant execution dispatch, final approval, or canonical state advancement authority");
