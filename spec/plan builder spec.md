@@ -63,22 +63,22 @@ Plan Builder 可以使用以下证据标签，但只在能明显降低歧义时�
 
 ## 4. Artifact 持久化契约
 
-Plan Builder 在 normalize mode 中先返回聊天里的候选计划和推荐路径。只有用户明确确认保存、写入或持久化计划后，才写入推荐路径：
+Plan Builder 在 normalize mode 中先返回聊天里的候选计划和 `filenameHint`。当最终输出需要持久化时，由 Command Lead 写入：
 
 ```text
-.liteagent/plans/<yyyy-mm-dd>-<short-slug>.md
+<OPENCODE_CONFIG_DIR>/openplan/<session_key>/<filename>.md
 ```
 
 允许：
 
-- 在用户明确确认后创建、更新和维护 `.liteagent/plans/*.md`。
-- 在用户明确确认后追加或维护 `.liteagent/plan-index.jsonl`。
+- 由 Command Lead 创建、更新和维护 `<OPENCODE_CONFIG_DIR>/openplan/<session_key>/*.md`。
+- 由 Command Lead 追加或维护 `openplan/index.jsonl`。
 - 在确认前用轻量概览卡帮助用户理解计划，概览可包含输入、输出、工作流、范围、风险、验证和确认点等少量关键信息，不必固定字段。
 
 禁止：
 
 - 将计划 artifact 写入 `.opencode/`。
-- 在用户没有明确确认保存、写入或持久化时写入 `.liteagent`。
+- Plan Builder 不直接写持久化文件；未进入持久化流程前只返回聊天内候选计划与 `filenameHint`。
 - 在用户没有明确要求删除/移除时删除计划文件。
 - 在用户没有明确要求删除/移除时移除或改写既有索引条目。
 - 把持久化计划 artifact 解释为拥有执行派发、最终批准或 canonical state 推进权限。
@@ -96,7 +96,7 @@ status: draft|reviewed|blocked
 repo_snapshot_ref: <snapshot_id_or_none>
 generated_by: plan_builder
 updated_at: <iso8601>
-recommended_plan_path: .liteagent/plans/<yyyy-mm-dd>-<short-slug>.md
+filenameHint: <plain-filename>.md
 ```
 
 必需 compact sections：
@@ -167,6 +167,6 @@ Plan Review 对 Plan Builder 是可选的；当用户要求、风险较高、计
 - acceptance criteria 是否可验证。
 - subtask DAG 字段是否完整。
 - maturity/status 是否合法。
-- artifact path 是否在 `.liteagent/plans/` 下。
+- `filenameHint` 是否可安全用于 `openplan` 持久化（纯文件名、`.md` 后缀、无路径穿越）。
 
 未通过自检的计划不得作为 final artifact 输出。

@@ -19,7 +19,7 @@
 - `plan-builder` 和 `deep-plan-builder` 带有 Decision Selector Discipline，会把阻塞选择收敛成 2-5 个具体选项；当允许用户自定义输入时保留 `Custom / other`。
 - `result-review` 是用户可选择调用的可选审查，只审查 Command Lead 的执行摘要/最终整合结果，不审查 Task Lead 子任务返回。
 - 有委派权的角色派遣任务时使用显式模板：`TASK`、`EXPECTED OUTCOME`、`ROLE`、`SCOPE`、`UPSTREAM EVIDENCE`、`REQUIRED TOOLS`、`MUST DO`、`MUST NOT DO`、`CONTEXT`、`DELIVERABLE FORMAT`、`FAILURE RETURN`；新建 subagent 任务时完全省略 `task_id`。
-- Plan Builder 会先展示轻量候选计划概览；只有用户明确确认保存后，持久化计划 artifact 才写入 `.liteagent/plans/`，并追加索引 `.liteagent/plan-index.jsonl`。
+- Plan Builder 会先展示轻量候选计划概览；当最终输出属于 durable artifact 时，由 Command Lead 持久化到 `<OPENCODE_CONFIG_DIR>/openplan/<session_key>/`，并维护 `openplan/index.jsonl`。
 - 在用户拥有的中小型项目中，Command Lead 会倾向根因重构和完整的问题导向修复，而不是偶发兼容 shim 或狭窄局部补丁；但仍会保留公开 API、持久化格式、安装器/配置契约、权限边界、角色拓扑、外部集成和用户明确约束。
 - 兼容 provider 的异步插件工具：`bounded_lite_route`、`bounded_lite_plan_dag`、`bounded_lite_plan_readiness`、`bounded_lite_plan_artifact`、`bounded_lite_background`、`bounded_lite_runtime_profile`、`bounded_lite_study_ingest`、`bounded_lite_study_package`、`bounded_lite_model_config`。
 - OpenCode 原生 `build` 和 `plan` 模式会被隐藏并禁用。

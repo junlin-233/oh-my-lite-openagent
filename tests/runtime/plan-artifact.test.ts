@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -1221,31 +1221,38 @@ describe("openplan plan artifact persistence", () => {
     });
   });
 
-  it("扫描到非法 frontmatter 文件时 rebuild 失败，且旧 index 不被破坏", async () => {
+  it("扫描到非法 frontmatter 文件但仍有合法 plan 时 rebuild 成功并返回 warning", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "openplan-phase3-"));
     const configDir = path.join(root, "config-home");
     const openplanRoot = path.join(configDir, OPENPLAN_DIR);
 
     await withConfigDir(configDir, async () => {
       await createPlan({ root, configDir, title: "A", markdown: "# A", filenameHint: "a.md", planId: "aaaabbbb" });
-      const originalIndex = await readFile(path.join(configDir, OPENPLAN_INDEX_FILE), "utf8");
-
       await writeFile(path.join(openplanRoot, sessionKey, "bad.md"), "---\nplan_id: broken\n---\nbody\n");
 
-      await expect(rebuildOpenPlanIndex({ configDir, mode: "manual-rebuild" })).rejects.toThrow(/invalid plan file/);
-      await expect(readFile(path.join(configDir, OPENPLAN_INDEX_FILE), "utf8")).resolves.toBe(originalIndex);
-      await expect(readFile(path.join(configDir, OPENPLAN_INDEX_FILE + ".bak"), "utf8")).rejects.toThrow();
+      const rebuilt = await rebuildOpenPlanIndex({ configDir, mode: "manual-rebuild" });
+      const index = await readFile(path.join(configDir, OPENPLAN_INDEX_FILE), "utf8");
+
+      expect(rebuilt.status).toBe("rebuilt");
+      expect(rebuilt.rebuiltRecordCount).toBe(1);
+      expect(rebuilt.skippedInvalidFileCount).toBe(1);
+      expect(rebuilt.firstSkippedInvalidFile).toBe(`${sessionKey}/bad.md`);
+      expect(rebuilt.warnings?.[0]).toMatchObject({
+        code: "PLANART_WARN_INVALID_PLAN_FILE_SKIPPED",
+        path: `${sessionKey}/bad.md`,
+      });
+      expect(index).toContain(`"path":"${sessionKey}/a.md"`);
+      expect(index).not.toContain(`"path":"${sessionKey}/bad.md"`);
     });
   });
 
-  it("扫描到非法 operation frontmatter 时 rebuild 失败，且旧 index 不被破坏", async () => {
+  it("扫描到非法 operation frontmatter 但仍有合法 plan 时 rebuild 成功并返回 warning", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "openplan-phase3-"));
     const configDir = path.join(root, "config-home");
     const openplanRoot = path.join(configDir, OPENPLAN_DIR);
 
     await withConfigDir(configDir, async () => {
       await createPlan({ root, configDir, title: "A", markdown: "# A", filenameHint: "a.md", planId: "aaaabbbb" });
-      const originalIndex = await readFile(path.join(configDir, OPENPLAN_INDEX_FILE), "utf8");
 
       await writeFile(path.join(openplanRoot, sessionKey, "bad-op.md"), [
         "---",
@@ -1266,9 +1273,67 @@ describe("openplan plan artifact persistence", () => {
         "",
       ].join("\n"));
 
-      await expect(rebuildOpenPlanIndex({ configDir, mode: "manual-rebuild" })).rejects.toThrow(/invalid plan file|unsupported operation/);
+      const rebuilt = await rebuildOpenPlanIndex({ configDir, mode: "manual-rebuild" });
+      const index = await readFile(path.join(configDir, OPENPLAN_INDEX_FILE), "utf8");
+
+      expect(rebuilt.status).toBe("rebuilt");
+      expect(rebuilt.rebuiltRecordCount).toBe(1);
+      expect(rebuilt.skippedInvalidFileCount).toBe(1);
+      expect(rebuilt.firstSkippedInvalidFile).toBe(`${sessionKey}/bad-op.md`);
+      expect(rebuilt.warnings?.[0]).toMatchObject({
+        code: "PLANART_WARN_INVALID_PLAN_FILE_SKIPPED",
+        path: `${sessionKey}/bad-op.md`,
+      });
+      expect(index).toContain(`"path":"${sessionKey}/a.md"`);
+      expect(index).not.toContain(`"path":"${sessionKey}/bad-op.md"`);
+    });
+  });
+
+  it("仅存在非法 plan 文件时 rebuild 失败，且旧 index 不被破坏", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "openplan-phase3-"));
+    const configDir = path.join(root, "config-home");
+    const openplanRoot = path.join(configDir, OPENPLAN_DIR);
+
+    await withConfigDir(configDir, async () => {
+      await mkdir(path.join(openplanRoot, sessionKey), { recursive: true });
+      await writeFile(path.join(configDir, OPENPLAN_INDEX_FILE), "{old-index}\n");
+      const originalIndex = await readFile(path.join(configDir, OPENPLAN_INDEX_FILE), "utf8");
+      await writeFile(path.join(openplanRoot, sessionKey, "bad-only.md"), "---\nplan_id: broken\n---\nbody\n");
+
+      await expect(rebuildOpenPlanIndex({ configDir, mode: "manual-rebuild" })).rejects.toThrow(/no valid plan files found/);
       await expect(readFile(path.join(configDir, OPENPLAN_INDEX_FILE), "utf8")).resolves.toBe(originalIndex);
     });
+  });
+
+  it("write-recovery 在 mixed 场景下成功回填 index 并返回 warning", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "openplan-phase3-"));
+    const configDir = path.join(root, "config-home");
+    const openplanRoot = path.join(configDir, OPENPLAN_DIR);
+
+    const result = await withConfigDir(configDir, async () => {
+      const created = await createPlan({ root, configDir, markdown: "# original", filenameHint: "same.md", planId: "aaaabbbb" });
+      await writeFile(path.join(openplanRoot, sessionKey, "bad.md"), "---\nplan_id: broken\n---\nbody\n");
+      return updatePlan({
+        root,
+        configDir,
+        targetPlanRef: created.path,
+        markdown: "# changed",
+        testFaults: { failIndexWriteOnce: true },
+      });
+    });
+
+    const index = await readFile(path.join(configDir, OPENPLAN_INDEX_FILE), "utf8");
+    expect(result.rebuildTriggered).toBe(true);
+    expect(result.indexStatus).toBe("rebuild_succeeded");
+    expect(result.skippedInvalidFileCount).toBe(1);
+    expect(result.firstSkippedInvalidFile).toBe(`${sessionKey}/bad.md`);
+    expect(result.warnings?.[0]).toMatchObject({
+      code: "PLANART_WARN_INVALID_PLAN_FILE_SKIPPED",
+      path: `${sessionKey}/bad.md`,
+    });
+    expect(index).toContain('"operation":"update"');
+    expect(index).toContain(`"path":"${sessionKey}/same.md"`);
+    expect(index).not.toContain(`"path":"${sessionKey}/bad.md"`);
   });
 
   it("rebuild/backfill 后 provenance 字段在 index 中仍能正确恢复，且必须同时存在", async () => {

@@ -119,6 +119,9 @@ export interface PlanArtifactWriteResult {
   operation: PlanArtifactOperation;
   rebuildTriggered: boolean;
   indexStatus: "written" | "rebuild_succeeded";
+  warnings?: Array<{ code: string; message: string; path?: string }>;
+  skippedInvalidFileCount?: number;
+  firstSkippedInvalidFile?: string;
 }
 
 export type RebuildOpenPlanIndexMode = "manual-rebuild" | "self-check-rebuild" | "write-recovery";
@@ -138,6 +141,9 @@ export interface RebuildOpenPlanIndexResult {
   rebuiltRecordCount: number;
   status: "rebuilt" | "empty";
   mode: RebuildOpenPlanIndexMode;
+  warnings?: Array<{ code: string; message: string; path?: string }>;
+  skippedInvalidFileCount?: number;
+  firstSkippedInvalidFile?: string;
 }
 
 export interface OpenPlanSelfCheckResult {
@@ -147,12 +153,21 @@ export interface OpenPlanSelfCheckResult {
   rebuiltRecordCount: number;
   status: "healthy" | "repaired" | "empty";
   mode: "self-check" | "self-check-rebuild";
+  warnings?: Array<{ code: string; message: string; path?: string }>;
+  skippedInvalidFileCount?: number;
+  firstSkippedInvalidFile?: string;
 }
 
 interface OpenPlanScanResult {
   records: CurrentStateIndexRecord[];
   scannedFileCount: number;
   invalidFiles: Array<{ path: string; errorMessage: string }>;
+}
+
+interface OpenPlanWarningSummary {
+  warnings: Array<{ code: string; message: string; path?: string }>;
+  skippedInvalidFileCount: number;
+  firstSkippedInvalidFile?: string;
 }
 
 class OpenPlanRebuildError extends Error {
@@ -483,6 +498,7 @@ async function finalizeArtifactWrite(input: {
 }): Promise<PlanArtifactWriteResult> {
   let rebuildTriggered = false;
   let indexStatus: "written" | "rebuild_succeeded" = "written";
+  let rebuildWarnings: OpenPlanWarningSummary | undefined;
 
   try {
     if (input.testFaults?.failIndexWriteOnce) {
@@ -502,11 +518,12 @@ async function finalizeArtifactWrite(input: {
         throw new Error("injected rebuild failure");
       }
 
-      await rebuildOpenPlanIndex({
+      const rebuilt = await rebuildOpenPlanIndex({
         configDir: path.dirname(input.openPlanRoot),
         mode: "write-recovery",
         testFaults: input.testFaults,
       });
+      rebuildWarnings = extractWarningSummary(rebuilt);
     } catch (rebuildError) {
       throw new Error([
         "PLANART_ERR_INDEX_WRITE_FAILED_REBUILD_FAILED:",
@@ -533,6 +550,7 @@ async function finalizeArtifactWrite(input: {
     operation: input.frontmatter.operation,
     rebuildTriggered,
     indexStatus,
+    ...(rebuildWarnings ?? {}),
   };
 }
 
@@ -540,12 +558,13 @@ export async function rebuildOpenPlanIndex(input: RebuildOpenPlanIndexInput = {}
   const openPlanRoot = resolveOpenPlanRoot(input.configDir);
   const indexPath = path.join(openPlanRoot, "index.jsonl");
   const scan = await scanOpenPlanRecords(openPlanRoot);
+  const warningSummary = buildWarningSummary(scan.invalidFiles);
 
-  if (scan.invalidFiles.length > 0) {
+  if (scan.invalidFiles.length > 0 && scan.records.length === 0) {
     const firstInvalid = scan.invalidFiles[0];
     throw new OpenPlanRebuildError({
       code: "PLANART_ERR_REBUILD_INVALID_PLAN_FILE",
-      message: `invalid plan file: ${firstInvalid?.path ?? "unknown"}; ${firstInvalid?.errorMessage ?? "frontmatter parse failed"}`,
+      message: `no valid plan files found; first invalid plan file: ${firstInvalid?.path ?? "unknown"}; ${firstInvalid?.errorMessage ?? "frontmatter parse failed"}`,
       indexPath,
       scannedFileCount: scan.scannedFileCount,
       invalidFileCount: scan.invalidFiles.length,
@@ -581,6 +600,7 @@ export async function rebuildOpenPlanIndex(input: RebuildOpenPlanIndexInput = {}
     rebuiltRecordCount: scan.records.length,
     status: scan.records.length === 0 ? "empty" : "rebuilt",
     mode: input.mode ?? "manual-rebuild",
+    ...(warningSummary ?? {}),
   };
 }
 
@@ -591,12 +611,13 @@ export async function ensureOpenPlanIndexHealthyOnce(input: {
   const openPlanRoot = resolveOpenPlanRoot(input.configDir);
   const indexPath = path.join(openPlanRoot, "index.jsonl");
   const scan = await scanOpenPlanRecords(openPlanRoot);
+  const warningSummary = buildWarningSummary(scan.invalidFiles);
 
-  if (scan.invalidFiles.length > 0) {
+  if (scan.invalidFiles.length > 0 && scan.records.length === 0) {
     const firstInvalid = scan.invalidFiles[0];
     throw new OpenPlanRebuildError({
       code: "PLANART_ERR_SELF_CHECK_INVALID_PLAN_FILE",
-      message: `index self-check repair failed; invalid plan file: ${firstInvalid?.path ?? "unknown"}; ${firstInvalid?.errorMessage ?? "frontmatter parse failed"}; requires follow-up repair`,
+      message: `index self-check repair failed; no valid plan files found; first invalid plan file: ${firstInvalid?.path ?? "unknown"}; ${firstInvalid?.errorMessage ?? "frontmatter parse failed"}; requires follow-up repair`,
       indexPath,
       scannedFileCount: scan.scannedFileCount,
       invalidFileCount: scan.invalidFiles.length,
@@ -613,6 +634,7 @@ export async function ensureOpenPlanIndexHealthyOnce(input: {
         rebuiltRecordCount: 0,
         status: "empty",
         mode: "self-check",
+        ...(warningSummary ?? {}),
       };
     }
 
@@ -628,6 +650,7 @@ export async function ensureOpenPlanIndexHealthyOnce(input: {
       rebuiltRecordCount: rebuilt.rebuiltRecordCount,
       status: rebuilt.rebuiltRecordCount === 0 ? "empty" : "repaired",
       mode: "self-check-rebuild",
+      ...(extractWarningSummary(rebuilt) ?? {}),
     };
   }
 
@@ -644,6 +667,7 @@ export async function ensureOpenPlanIndexHealthyOnce(input: {
       rebuiltRecordCount: rebuilt.rebuiltRecordCount,
       status: rebuilt.rebuiltRecordCount === 0 ? "empty" : "repaired",
       mode: "self-check-rebuild",
+      ...(extractWarningSummary(rebuilt) ?? {}),
     };
   }
 
@@ -654,6 +678,39 @@ export async function ensureOpenPlanIndexHealthyOnce(input: {
     rebuiltRecordCount: scan.records.length,
     status: scan.records.length === 0 ? "empty" : "healthy",
     mode: "self-check",
+    ...(warningSummary ?? {}),
+  };
+}
+
+function buildWarningSummary(
+  invalidFiles: Array<{ path: string; errorMessage: string }>,
+): OpenPlanWarningSummary | undefined {
+  if (invalidFiles.length === 0) return undefined;
+  return {
+    warnings: invalidFiles.map((invalidFile) => ({
+      code: "PLANART_WARN_INVALID_PLAN_FILE_SKIPPED",
+      message: `skipped invalid plan file: ${invalidFile.errorMessage}`,
+      ...(invalidFile.path ? { path: invalidFile.path } : {}),
+    })),
+    skippedInvalidFileCount: invalidFiles.length,
+    ...(invalidFiles[0]?.path ? { firstSkippedInvalidFile: invalidFiles[0].path } : {}),
+  };
+}
+
+function extractWarningSummary(
+  value: {
+    warnings?: Array<{ code: string; message: string; path?: string }>;
+    skippedInvalidFileCount?: number;
+    firstSkippedInvalidFile?: string;
+  },
+): OpenPlanWarningSummary | undefined {
+  if (!value.warnings || value.warnings.length === 0 || typeof value.skippedInvalidFileCount !== "number") {
+    return undefined;
+  }
+  return {
+    warnings: value.warnings,
+    skippedInvalidFileCount: value.skippedInvalidFileCount,
+    ...(value.firstSkippedInvalidFile ? { firstSkippedInvalidFile: value.firstSkippedInvalidFile } : {}),
   };
 }
 

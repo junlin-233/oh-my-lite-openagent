@@ -274,6 +274,25 @@ describe("OpenCode agent topology", () => {
     expect(promptText).toContain("If a response is merely an execution result");
   });
 
+  it("documents Study Protocol without adding modes or agents", () => {
+    const promptText = readPrompt("command-lead");
+
+    expect(promptText).toContain("## Study Protocol");
+    expect(promptText).toContain("bounded_lite_study_ingest");
+    expect(promptText).toContain("bounded_lite_study_package");
+    expect(promptText).toContain('stage: "sources"');
+    expect(promptText).toContain("extractionQuality");
+    expect(promptText).toContain("pdftotext");
+    expect(promptText).toContain("first-level `.ppt`, `.pptx`, and `.pdf`");
+    expect(promptText).toContain("courseware as the canonical source");
+    expect(promptText).toContain("[External]");
+    expect(promptText).toContain("source-index.json");
+    expect(promptText).toContain("anki_flashcards.csv");
+    expect(promptText).toContain("<!-- oh-my-lite-study:start -->");
+    expect(promptText).toContain("Command Lead-owned batch summary");
+    expect(promptText).toContain("LibreOffice/`soffice`");
+  });
+
   it("requires Command Lead Go Protocol to stay non-interactive and bounded", () => {
     const promptText = readPrompt("command-lead");
 

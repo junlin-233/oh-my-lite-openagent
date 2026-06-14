@@ -118,6 +118,12 @@ export interface BoundedLitePluginOptions {
   maxChildDepth?: number;
   configDir?: string;
   taskLeadProfiles?: Record<string, unknown>;
+  planArtifactTestFaults?: {
+    failRebuild?: boolean;
+  };
+  planArtifactTestHooks?: {
+    onSelfCheckAttempt?: () => void;
+  };
 }
 
 export interface NormalizedBoundedLitePluginOptions {
@@ -128,6 +134,12 @@ export interface NormalizedBoundedLitePluginOptions {
   maxChildDepth: number;
   configDir?: string;
   taskLeadProfiles?: Record<string, unknown>;
+  planArtifactTestFaults?: {
+    failRebuild?: boolean;
+  };
+  planArtifactTestHooks?: {
+    onSelfCheckAttempt?: () => void;
+  };
 }
 
 export function normalizePluginOptions(
@@ -148,6 +160,26 @@ export function normalizePluginOptions(
         options.taskLeadProfiles !== null &&
         !Array.isArray(options.taskLeadProfiles)
       ? { taskLeadProfiles: normalizeTaskLeadProfilesConfig(options.taskLeadProfiles) }
+      : {}),
+    ...(typeof options.planArtifactTestFaults === "object" &&
+        options.planArtifactTestFaults !== null &&
+        !Array.isArray(options.planArtifactTestFaults)
+      ? {
+        planArtifactTestFaults: {
+          ...(options.planArtifactTestFaults.failRebuild === true ? { failRebuild: true } : {}),
+        },
+      }
+      : {}),
+    ...(typeof options.planArtifactTestHooks === "object" &&
+        options.planArtifactTestHooks !== null &&
+        !Array.isArray(options.planArtifactTestHooks)
+      ? {
+        planArtifactTestHooks: {
+          ...(typeof options.planArtifactTestHooks.onSelfCheckAttempt === "function"
+            ? { onSelfCheckAttempt: options.planArtifactTestHooks.onSelfCheckAttempt }
+            : {}),
+        },
+      }
       : {}),
   };
 }
@@ -1809,10 +1841,120 @@ export function createBoundedLitePlugin(
     bundledMcpEnabled: options.enableBundledMcp,
   });
   const background = new BackgroundCoordinator();
-  let planArtifactSelfCheckRan = false;
+  let planArtifactSelfCheckHealthy = false;
   let planArtifactSelfCheckFailure: { code: string; message: string } | undefined;
-  let planArtifactSelfCheckPromise: Promise<void> | undefined;
+  let planArtifactSelfCheckWarnings: {
+    warnings?: Array<{ code: string; message: string; path?: string }>;
+    skippedInvalidFileCount?: number;
+    firstSkippedInvalidFile?: string;
+  } | undefined;
+  let planArtifactSelfCheckPromise: Promise<{
+    warnings?: Array<{ code: string; message: string; path?: string }>;
+    skippedInvalidFileCount?: number;
+    firstSkippedInvalidFile?: string;
+  } | undefined> | undefined;
   let runtimePlanArtifactSession: RuntimePlanArtifactSession | undefined;
+
+  function extractPlanArtifactWarnings(value: Record<string, unknown>): {
+    warnings?: Array<{ code: string; message: string; path?: string }>;
+    skippedInvalidFileCount?: number;
+    firstSkippedInvalidFile?: string;
+  } | undefined {
+    const warnings = Array.isArray(value["warnings"])
+      ? value["warnings"].filter((item): item is { code: string; message: string; path?: string } => (
+        isRecord(item) && typeof item["code"] === "string" && typeof item["message"] === "string"
+      )).map((item) => ({
+        code: item.code,
+        message: item.message,
+        ...(typeof item.path === "string" ? { path: item.path } : {}),
+      }))
+      : [];
+    const skippedInvalidFileCount = typeof value["skippedInvalidFileCount"] === "number"
+      ? value["skippedInvalidFileCount"]
+      : undefined;
+    const firstSkippedInvalidFile = typeof value["firstSkippedInvalidFile"] === "string"
+      ? value["firstSkippedInvalidFile"]
+      : undefined;
+
+    if (warnings.length === 0 && skippedInvalidFileCount === undefined && firstSkippedInvalidFile === undefined) {
+      return undefined;
+    }
+
+    return {
+      ...(warnings.length > 0 ? { warnings } : {}),
+      ...(typeof skippedInvalidFileCount === "number" ? { skippedInvalidFileCount } : {}),
+      ...(firstSkippedInvalidFile ? { firstSkippedInvalidFile } : {}),
+    };
+  }
+
+  function mergePlanArtifactWarnings(...items: Array<{
+    warnings?: Array<{ code: string; message: string; path?: string }>;
+    skippedInvalidFileCount?: number;
+    firstSkippedInvalidFile?: string;
+  } | undefined>): {
+    warnings?: Array<{ code: string; message: string; path?: string }>;
+    skippedInvalidFileCount?: number;
+    firstSkippedInvalidFile?: string;
+  } | undefined {
+    const warningList: Array<{ code: string; message: string; path?: string }> = [];
+    let skippedInvalidFileCount = 0;
+    let firstSkippedInvalidFile: string | undefined;
+
+    for (const item of items) {
+      if (!item) continue;
+      if (Array.isArray(item.warnings)) warningList.push(...item.warnings);
+      if (typeof item.skippedInvalidFileCount === "number") skippedInvalidFileCount += item.skippedInvalidFileCount;
+      if (!firstSkippedInvalidFile && item.firstSkippedInvalidFile) firstSkippedInvalidFile = item.firstSkippedInvalidFile;
+    }
+
+    if (warningList.length === 0 && skippedInvalidFileCount === 0 && !firstSkippedInvalidFile) {
+      return undefined;
+    }
+
+    return {
+      ...(warningList.length > 0 ? { warnings: warningList } : {}),
+      ...(skippedInvalidFileCount > 0 ? { skippedInvalidFileCount } : {}),
+      ...(firstSkippedInvalidFile ? { firstSkippedInvalidFile } : {}),
+    };
+  }
+
+  async function ensurePlanArtifactSelfCheck(): Promise<{
+    warnings?: Array<{ code: string; message: string; path?: string }>;
+    skippedInvalidFileCount?: number;
+    firstSkippedInvalidFile?: string;
+  } | undefined> {
+    if (planArtifactSelfCheckHealthy) return planArtifactSelfCheckWarnings;
+
+    if (!planArtifactSelfCheckPromise) {
+      planArtifactSelfCheckPromise = (async () => {
+        try {
+          options.planArtifactTestHooks?.onSelfCheckAttempt?.();
+          const result = await ensureOpenPlanIndexHealthyOnce({
+            ...(options.configDir ? { configDir: options.configDir } : {}),
+            ...(options.planArtifactTestFaults ? { testFaults: options.planArtifactTestFaults } : {}),
+          });
+          const warnings = extractPlanArtifactWarnings(result as unknown as Record<string, unknown>);
+          planArtifactSelfCheckWarnings = warnings;
+          planArtifactSelfCheckFailure = undefined;
+          planArtifactSelfCheckHealthy = true;
+          return warnings;
+        } catch (error) {
+          const parsed = parsePlanArtifactError(error);
+          planArtifactSelfCheckFailure = {
+            code: parsed.code,
+            message: `index self-check repair failed: ${parsed.message}; requires follow-up repair`,
+          };
+          planArtifactSelfCheckWarnings = undefined;
+          planArtifactSelfCheckHealthy = false;
+          throw error;
+        } finally {
+          planArtifactSelfCheckPromise = undefined;
+        }
+      })();
+    }
+
+    return planArtifactSelfCheckPromise;
+  }
 
   return {
     async config() {
@@ -1904,29 +2046,19 @@ Examples:
           const requestedAction = readString(args["action"]) === "rebuild" ? "rebuild" : "write";
 
           try {
-            if (!planArtifactSelfCheckRan) {
-              if (!planArtifactSelfCheckPromise) {
-                planArtifactSelfCheckPromise = (async () => {
-                  try {
-                    await ensureOpenPlanIndexHealthyOnce({
-                      ...(options.configDir ? { configDir: options.configDir } : {}),
-                    });
-                  } catch (error) {
-                    const parsed = parsePlanArtifactError(error);
-                    planArtifactSelfCheckFailure = {
-                      code: parsed.code,
-                      message: `index self-check repair failed: ${parsed.message}; requires follow-up repair`,
-                    };
-                  } finally {
-                    planArtifactSelfCheckRan = true;
-                  }
-                })();
-              }
-
-              await planArtifactSelfCheckPromise;
-            }
-
             const request = parsePlanArtifactRequest(args);
+            let selfCheckWarnings: {
+              warnings?: Array<{ code: string; message: string; path?: string }>;
+              skippedInvalidFileCount?: number;
+              firstSkippedInvalidFile?: string;
+            } | undefined;
+            if (request.action !== "rebuild") {
+              try {
+                selfCheckWarnings = await ensurePlanArtifactSelfCheck();
+              } catch {
+                // failure state is exposed below via planArtifactSelfCheckFailure
+              }
+            }
             if (request.action === "write") {
               if (request.operation !== "update") {
                 runtimePlanArtifactSession ??= createRuntimePlanArtifactSession();
@@ -1938,9 +2070,12 @@ Examples:
                 mode: "manual-rebuild",
                 ...(request.generatedBy ? { generatedBy: request.generatedBy } : {}),
                 ...(request.reason ? { reason: request.reason } : {}),
+                ...(options.planArtifactTestFaults ? { testFaults: options.planArtifactTestFaults } : {}),
               });
 
               planArtifactSelfCheckFailure = undefined;
+              planArtifactSelfCheckHealthy = true;
+              planArtifactSelfCheckWarnings = extractPlanArtifactWarnings(rebuilt as unknown as Record<string, unknown>);
               return toToolOutput({
                 ok: true,
                 action: request.action,
@@ -1950,6 +2085,7 @@ Examples:
                 rebuiltRecordCount: rebuilt.rebuiltRecordCount,
                 status: rebuilt.status,
                 mode: rebuilt.mode,
+                ...(planArtifactSelfCheckWarnings ?? {}),
               });
             }
 
@@ -1988,6 +2124,10 @@ Examples:
               ...(request.targetPlanRef ? { targetPlanRef: request.targetPlanRef } : {}),
               ...(options.configDir ? { configDir: options.configDir } : {}),
             });
+            const resultWarnings = mergePlanArtifactWarnings(
+              selfCheckWarnings,
+              extractPlanArtifactWarnings(result as unknown as Record<string, unknown>),
+            );
 
             return toToolOutput({
               ok: true,
@@ -2001,6 +2141,7 @@ Examples:
               status: result.status,
               operation: result.operation,
               rebuildTriggered: result.rebuildTriggered,
+              ...(resultWarnings ?? {}),
             });
           } catch (error) {
             return toToolOutput(parsePlanArtifactError(error, requestedAction));
