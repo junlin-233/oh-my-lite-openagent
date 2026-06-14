@@ -63,7 +63,7 @@ Plan Builder 可以使用以下证据标签，但只在能明显降低歧义时�
 
 ## 4. Artifact 持久化契约
 
-Plan Builder 在 normalize mode 中返回计划聊天 artifact，并写入推荐路径：
+Plan Builder 在 normalize mode 中先返回聊天里的候选计划和推荐路径。只有用户明确确认保存、写入或持久化计划后，才写入推荐路径：
 
 ```text
 .liteagent/plans/<yyyy-mm-dd>-<short-slug>.md
@@ -71,15 +71,17 @@ Plan Builder 在 normalize mode 中返回计划聊天 artifact，并写入推荐
 
 允许：
 
-- 创建、更新和维护 `.liteagent/plans/*.md`。
-- 追加或维护 `.liteagent/plan-index.jsonl`。
+- 在用户明确确认后创建、更新和维护 `.liteagent/plans/*.md`。
+- 在用户明确确认后追加或维护 `.liteagent/plan-index.jsonl`。
+- 在确认前用轻量概览卡帮助用户理解计划，概览可包含输入、输出、工作流、范围、风险、验证和确认点等少量关键信息，不必固定字段。
 
 禁止：
 
 - 将计划 artifact 写入 `.opencode/`。
+- 在用户没有明确确认保存、写入或持久化时写入 `.liteagent`。
 - 在用户没有明确要求删除/移除时删除计划文件。
 - 在用户没有明确要求删除/移除时移除或改写既有索引条目。
-- 把直接写计划 artifact 解释为拥有执行派发、最终批准或 canonical state 推进权限。
+- 把持久化计划 artifact 解释为拥有执行派发、最终批准或 canonical state 推进权限。
 
 ## 5. Compact v2.1 文档形状
 

@@ -93,6 +93,26 @@ const MANAGED_MCP = {
     "command": ["npx", "-y", "@playwright/mcp"]
   }
 };
+const STUDY_COMMAND_TEMPLATE = `Run Study Protocol for final exam review materials:
+$ARGUMENTS
+
+Treat the current OpenCode working directory as the courseware directory. Discover only first-level .ppt, .pptx, and .pdf files with bounded_lite_study_ingest, generate the review package with bounded_lite_study_package, and do not recursively scan subdirectories.
+
+Workflow:
+1. Parse $ARGUMENTS for subject, exam style, scope, and any user constraints; if missing, infer practical defaults from filenames and current-directory courseware.
+2. Use courseware as the canonical source. Librarian/external explanations are allowed only as supplemental context and every non-courseware item must be marked [External].
+3. Run bounded_lite_study_package with stage="sources" first to create AGENTS.md, source-index.json, coverage-report.md, and source-faithful sources/ notes for extraction review; after the source layer is acceptable, run the full package stage for study-guide.md, exam-points.md, mindmap.md, anki_flashcards.csv, practice-questions.md, summaries/, reviews/, and repairs/.
+4. Preserve existing AGENTS.md content. Update only the <!-- oh-my-lite-study:start --> to <!-- oh-my-lite-study:end --> managed block; append the block if no markers exist; stop with a recoverable blocker for missing, duplicate, reversed, or nested markers.
+5. For each deck or slice, keep source-faithful notes in sources/<deck>.md and exam-focused summaries in summaries/<deck>.md. Use extractionQuality, confidence, and needsManualReview to flag low-text or text-sparse pages instead of inventing missing content.
+6. Integrate at most three Task Lead results into a Command Lead-owned batch summary before Result Review; after all batches pass, review the Command Lead-owned final integrated result.
+
+Safety boundaries:
+- Do not write study outputs outside the current courseware directory unless the user explicitly authorizes it.
+- Do not write study outputs into .opencode/ or .liteagent/.
+- Do not ingest generated study outputs or recurse into sources/, summaries/, reviews/, repairs/, .opencode/, or .liteagent/.
+- PDF extraction prefers optional pdftotext when available and falls back to built-in literal text extraction.
+- Legacy .ppt is converted through LibreOffice/soffice when available; if conversion is unavailable or fails, return a recoverable blocker instead of silently skipping it.
+- /study is a command workflow through command-lead, not a new OpenCode mode or agent.`;
 
 export const MANAGED_CONFIG = {
   "$schema": "https://opencode.ai/config.json",
@@ -340,6 +360,11 @@ export const MANAGED_CONFIG = {
       "description": "Run a non-interactive agentic goal workflow through Command Lead.",
       "agent": "command-lead",
       "template": GO_COMMAND_TEMPLATE
+    },
+    "study": {
+      "description": "Generate a current-directory final exam review project from .ppt, .pptx, and .pdf courseware.",
+      "agent": "command-lead",
+      "template": STUDY_COMMAND_TEMPLATE
     }
   },
   "mcp": MANAGED_MCP,
@@ -402,7 +427,9 @@ export const MANAGED_CONFIG = {
           "plan-review": "allow"
         },
         "edit": {
-          "*": "allow"
+          "*": "deny",
+          ".liteagent/**": "allow",
+          "**/.liteagent/**": "allow"
         }
       }
     },

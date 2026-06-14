@@ -19,6 +19,7 @@ describe("global installer contract", () => {
     expect(installScript).toContain("const MANAGED_COMMAND_NAMES = new Set");
     expect(installScript).toContain('"agent-models"');
     expect(installScript).toContain('"go"');
+    expect(installScript).toContain('"study"');
     expect(installScript).toContain('"Character-model"');
     expect(installScript).toContain("!MANAGED_COMMAND_NAMES.has(commandName)");
   });

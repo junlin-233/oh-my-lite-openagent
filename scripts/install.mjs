@@ -13,6 +13,7 @@ const DEFAULT_PLUGIN_OPTIONS = { mode: "full" };
 const MANAGED_COMMAND_NAMES = new Set([
   "agent-models",
   "go",
+  "study",
   "Character-model",
 ]);
 const MANAGED_MCP_NAMES = new Set([

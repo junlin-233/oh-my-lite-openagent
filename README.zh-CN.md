@@ -19,9 +19,9 @@
 - `plan-builder` 和 `deep-plan-builder` 带有 Decision Selector Discipline，会把阻塞选择收敛成 2-5 个具体选项；当允许用户自定义输入时保留 `Custom / other`。
 - `result-review` 是用户可选择调用的可选审查，只审查 Command Lead 的执行摘要/最终整合结果，不审查 Task Lead 子任务返回。
 - 有委派权的角色派遣任务时使用显式模板：`TASK`、`EXPECTED OUTCOME`、`ROLE`、`SCOPE`、`UPSTREAM EVIDENCE`、`REQUIRED TOOLS`、`MUST DO`、`MUST NOT DO`、`CONTEXT`、`DELIVERABLE FORMAT`、`FAILURE RETURN`；新建 subagent 任务时完全省略 `task_id`。
-- 持久化计划 artifact 会写入 `.liteagent/plans/`，并追加索引 `.liteagent/plan-index.jsonl`。
+- Plan Builder 会先展示轻量候选计划概览；只有用户明确确认保存后，持久化计划 artifact 才写入 `.liteagent/plans/`，并追加索引 `.liteagent/plan-index.jsonl`。
 - 在用户拥有的中小型项目中，Command Lead 会倾向根因重构和完整的问题导向修复，而不是偶发兼容 shim 或狭窄局部补丁；但仍会保留公开 API、持久化格式、安装器/配置契约、权限边界、角色拓扑、外部集成和用户明确约束。
-- 兼容 provider 的异步插件工具：`bounded_lite_route`、`bounded_lite_plan_dag`、`bounded_lite_plan_readiness`、`bounded_lite_plan_artifact`、`bounded_lite_background`、`bounded_lite_runtime_profile`、`bounded_lite_model_config`。
+- 兼容 provider 的异步插件工具：`bounded_lite_route`、`bounded_lite_plan_dag`、`bounded_lite_plan_readiness`、`bounded_lite_plan_artifact`、`bounded_lite_background`、`bounded_lite_runtime_profile`、`bounded_lite_study_ingest`、`bounded_lite_study_package`、`bounded_lite_model_config`。
 - OpenCode 原生 `build` 和 `plan` 模式会被隐藏并禁用。
 - 全局安装器会保留你已有的 model、provider、API key、插件、MCP 和自定义 agent。
 
@@ -91,6 +91,8 @@ bounded_lite_plan_readiness
 bounded_lite_plan_artifact
 bounded_lite_background
 bounded_lite_runtime_profile
+bounded_lite_study_ingest
+bounded_lite_study_package
 bounded_lite_model_config
 ```
 
@@ -165,6 +167,21 @@ oh-my-lite-openagent --interactive
 ```
 
 `/go` 是工作流命令，不是新的 OpenCode mode 或 agent。除非目标明确请求并授权，它不会提交、推送、发布、执行破坏性操作，也不会写入外部/用户本地 OpenCode 配置。
+
+
+## 复习资料工作流命令
+
+在包含课件的目录中启动 OpenCode TUI，然后运行：
+
+```text
+/study --subject "数据库" --exam "闭卷期末"
+```
+
+`/study` 会把当前目录交给 `command-lead`，按期末复习工作流执行。它使用 `bounded_lite_study_ingest` 只发现当前目录第一层的 `.ppt`、`.pptx` 和 `.pdf` 文件，再用 `bounded_lite_study_package` 创建默认复习项目。课件是 canonical source，复习项目默认写回同一个目录。package 工具支持 `stage: "sources"`，可先生成 `source-index.json` 和原文笔记层，再生成完整复习资料。
+
+默认产物包括 `AGENTS.md`、`source-index.json`、`study-guide.md`、`exam-points.md`、`mindmap.md`、`anki_flashcards.csv`、`practice-questions.md`、`coverage-report.md`，以及 `sources/`、`summaries/`、`reviews/`、`repairs/`。如果已有 `AGENTS.md`，Oh My Lite 只管理 `<!-- oh-my-lite-study:start -->` 到 `<!-- oh-my-lite-study:end -->` 之间的区块，并保留其他内容。
+
+外部解释只能作为补充上下文，并必须标记 `[External]`。PDF 提取会优先使用可选的 `pdftotext`，不可用时回退到内置 literal text 提取。旧版 `.ppt` 会在可用时通过 LibreOffice/`soffice` 转换；如果缺少工具或转换失败，`/study` 会返回可恢复 blocker，而不是静默跳过文件。ingest 会报告 `extractionQuality`、`confidence` 和 `needsManualReview`，用于标记文本稀疏页。`/study` 是命令工作流，不是新的 OpenCode mode 或 agent。
 
 
 ## 角色与 Task Lead Profile 模型配置

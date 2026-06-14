@@ -54,13 +54,61 @@ import {
   type LiteOpenAgentConfig,
   withLiteConfigAppliedToOpenCodeConfig,
 } from "../lib/runtime/lite-config.js";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { isKnownTaskLeadProfile } from "../lib/runtime/task-lead-profiles.js";
 import { tool } from "@opencode-ai/plugin/tool";
+import { inflateRawSync } from "node:zlib";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 const PLUGIN_FILE = "bounded-lite.ts";
+const STUDY_SUPPORTED_EXTENSIONS = new Set([".ppt", ".pptx", ".pdf"]);
+const STUDY_GENERATED_FILES = new Set([
+  "AGENTS.md",
+  "source-index.json",
+  "study-guide.md",
+  "exam-points.md",
+  "mindmap.md",
+  "anki_flashcards.csv",
+  "practice-questions.md",
+  "coverage-report.md",
+]);
+const STUDY_GENERATED_DIRECTORIES = new Set([
+  "sources",
+  "summaries",
+  "reviews",
+  "repairs",
+  ".opencode",
+  ".liteagent",
+]);
+const STUDY_AGENT_START = "<!-- oh-my-lite-study:start -->";
+const STUDY_AGENT_END = "<!-- oh-my-lite-study:end -->";
+const execFileAsync = promisify(execFile);
+
+type StudyExtractionQuality = "high" | "medium" | "low" | "blocked";
+
+interface StudySlide {
+  page: number;
+  title?: string;
+  text: string;
+  lowText: boolean;
+  extractionMethod?: string;
+  extractionQuality?: StudyExtractionQuality;
+  confidence?: number;
+  needsManualReview?: boolean;
+}
+
+interface StudyExtractionSummary {
+  method: string;
+  quality: StudyExtractionQuality;
+  confidence: number;
+  textLength: number;
+  lowTextPageCount: number;
+  needsManualReview: boolean;
+}
 
 export interface BoundedLitePluginOptions {
   mode?: "full" | "degraded";
@@ -244,6 +292,594 @@ function stripTrailingCommas(content: string): string {
 
 function parseJsonConfig(content: string): Record<string, unknown> {
   return JSON.parse(stripTrailingCommas(stripJsonComments(content.replace(/^\uFEFF/, "")))) as Record<string, unknown>;
+}
+
+function slugifyStudyId(value: string): string {
+  const slug = value
+    .replace(/\.[^.]+$/, "")
+    .normalize("NFKD")
+    .replace(/[^\p{Letter}\p{Number}]+/gu, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
+
+  return slug || "courseware";
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function decodeXmlText(value: string): string {
+  return value
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractChapterCandidates(text: string): string[] {
+  const candidates: string[] = [];
+  const patterns = [
+    /(?:^|[\n\r。；;])\s*((?:第\s*[一二三四五六七八九十百千万0-9]+\s*[章节讲部分篇][^\n\r。；;]{0,48}))/g,
+    /(?:^|[\n\r])\s*((?:chapter|unit|module|lecture|section)\s+[0-9ivxlcdm]+[^\n\r]{0,48})/gi,
+  ];
+
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      if (match[1]) candidates.push(match[1]);
+    }
+  }
+
+  return uniqueStrings(candidates).slice(0, 20);
+}
+
+function buildStudyManagedAgentsBlock(sourceCount: number): string {
+  return [
+    STUDY_AGENT_START,
+    "## Oh My Lite Study Project",
+    "",
+    "- Treat courseware files as the canonical source for this directory.",
+    "- Mark all supplemental non-courseware material as `[External]`.",
+    "- Keep `sources/` source-faithful and `summaries/` exam-focused.",
+    "- Update `coverage-report.md` when adding or repairing review materials.",
+    `- Current indexed courseware files: ${sourceCount}.`,
+    STUDY_AGENT_END,
+  ].join("\n");
+}
+
+function upsertStudyAgentsBlock(content: string, sourceCount: number): { content?: string; blocker?: Record<string, unknown> } {
+  const starts = [...content.matchAll(new RegExp(STUDY_AGENT_START.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"))];
+  const ends = [...content.matchAll(new RegExp(STUDY_AGENT_END.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"))];
+
+  if (starts.length === 0 && ends.length === 0) {
+    const separator = content.trim() === "" ? "" : "\n\n";
+    return { content: `${content.replace(/\s*$/, "")}${separator}${buildStudyManagedAgentsBlock(sourceCount)}\n` };
+  }
+
+  if (starts.length !== 1 || ends.length !== 1 || starts[0]?.index === undefined || ends[0]?.index === undefined || starts[0].index > ends[0].index) {
+    return {
+      blocker: {
+        file: "AGENTS.md",
+        reason: "Invalid oh-my-lite-study managed markers: expected exactly one ordered start/end pair.",
+        recoverability: "recoverable",
+      },
+    };
+  }
+
+  const before = content.slice(0, starts[0].index).replace(/\s*$/, "");
+  const after = content.slice(ends[0].index + STUDY_AGENT_END.length).replace(/^\s*/, "");
+  return {
+    content: `${before}${before ? "\n\n" : ""}${buildStudyManagedAgentsBlock(sourceCount)}${after ? `\n\n${after}` : ""}`,
+  };
+}
+
+function sourceId(source: Record<string, unknown>): string {
+  return typeof source.id === "string" ? source.id : slugifyStudyId(String(source.filename ?? "courseware"));
+}
+
+function sourceTitle(source: Record<string, unknown>): string {
+  return typeof source.filename === "string" ? source.filename : sourceId(source);
+}
+
+function sourceSlides(source: Record<string, unknown>): Array<Record<string, unknown>> {
+  return Array.isArray(source.slides) ? source.slides.filter(isRecord) : [];
+}
+
+function buildSourceMarkdown(source: Record<string, unknown>): string {
+  const slides = sourceSlides(source);
+  const lines = [`# ${sourceTitle(source)}`, "", "Source-faithful extracted courseware notes.", ""];
+
+  for (const slide of slides) {
+    lines.push(`## Page ${slide.page ?? "?"}`);
+    if (typeof slide.title === "string" && slide.title.trim() !== "") lines.push(`Title: ${slide.title}`);
+    lines.push("", typeof slide.text === "string" && slide.text.trim() !== "" ? slide.text.trim() : "[Low text / manual text review needed]", "");
+  }
+
+  if (slides.length === 0) lines.push("[No extractable text. Manual text review or conversion review needed.]", "");
+  return `${lines.join("\n").trim()}\n`;
+}
+
+function buildSummaryMarkdown(source: Record<string, unknown>): string {
+  const chapters = Array.isArray(source.chapterCandidates) ? source.chapterCandidates : [];
+  const lowTextPages = Array.isArray(source.lowTextPages) ? source.lowTextPages : [];
+
+  return [
+    `# ${sourceTitle(source)} Summary`,
+    "",
+    "## Chapter Candidates",
+    ...(chapters.length > 0 ? chapters.map((chapter) => `- ${chapter}`) : ["- To be refined from source notes."]),
+    "",
+    "## Exam Focus",
+    "- Key points should be derived from the source-faithful notes in the matching `sources/` file.",
+    "- Mark any supplemental explanation as `[External]`.",
+    "",
+    "## Manual Text Review",
+    ...(lowTextPages.length > 0 ? lowTextPages.map((page) => `- Page ${page}: low-text or text-sparse.`) : ["- No low-text pages reported by ingest."]),
+    "",
+  ].join("\n");
+}
+
+async function readOptionalFile(filePath: string): Promise<string> {
+  try {
+    return await readFile(filePath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return "";
+    throw error;
+  }
+}
+
+function readStudyPackageStage(args: Record<string, unknown>): "sources" | "full" {
+  const stage = readString(args["stage"]);
+  return stage === "sources" || stage === "source-index" ? "sources" : "full";
+}
+
+async function generateStudyPackage(directory: string, stage: "sources" | "full" = "full"): Promise<Record<string, unknown>> {
+  const coursewareDir = path.resolve(directory);
+  const sourceIndex = await ingestStudyCourseware(coursewareDir);
+  const sources = Array.isArray(sourceIndex.sources) ? sourceIndex.sources.filter(isRecord) : [];
+  const agentsPath = path.join(coursewareDir, "AGENTS.md");
+  const agentsResult = upsertStudyAgentsBlock(await readOptionalFile(agentsPath), sources.length);
+
+  if (agentsResult.blocker) {
+    return {
+      status: "blocked",
+      recoverableBlockers: [agentsResult.blocker],
+      writtenFiles: [],
+    };
+  }
+
+  for (const directoryName of ["sources", "summaries", "reviews", "repairs"]) {
+    await mkdir(path.join(coursewareDir, directoryName), { recursive: true });
+  }
+
+  const writtenFiles: string[] = [];
+  const writeStudyFile = async (relativePath: string, content: string): Promise<void> => {
+    await writeFile(path.join(coursewareDir, relativePath), content);
+    writtenFiles.push(relativePath);
+  };
+
+  await writeStudyFile("AGENTS.md", agentsResult.content ?? buildStudyManagedAgentsBlock(sources.length));
+  await writeStudyFile("source-index.json", `${JSON.stringify(sourceIndex, null, 2)}\n`);
+  await writeStudyFile("coverage-report.md", `# Coverage Report\n\n- Indexed courseware files: ${sources.length}\n- Low-text pages: ${Array.isArray(sourceIndex.lowTextPages) ? sourceIndex.lowTextPages.length : 0}\n- Recoverable blockers: ${Array.isArray(sourceIndex.recoverableBlockers) ? sourceIndex.recoverableBlockers.length : 0}\n`);
+
+  for (const source of sources) {
+    await writeStudyFile(`sources/${sourceId(source)}.md`, buildSourceMarkdown(source));
+    if (stage === "full") await writeStudyFile(`summaries/${sourceId(source)}.md`, buildSummaryMarkdown(source));
+  }
+
+  if (stage === "full") {
+    await writeStudyFile("study-guide.md", "# Study Guide\n\nUse `exam-points.md`, `practice-questions.md`, and per-deck summaries for final review.\n");
+    await writeStudyFile("exam-points.md", `# Exam Points\n\n${sources.map((source) => `- ${sourceTitle(source)}: derive exam points from \`summaries/${sourceId(source)}.md\`.`).join("\n") || "- No courseware sources indexed."}\n`);
+    await writeStudyFile("mindmap.md", `# Mindmap\n\n- Final Review\n${sources.map((source) => `  - ${sourceTitle(source)}`).join("\n")}\n`);
+    await writeStudyFile("anki_flashcards.csv", "Front,Back,Source\n");
+    await writeStudyFile("practice-questions.md", "# Practice Questions\n\n- Add source-referenced questions after summarization.\n");
+  }
+
+  return {
+    status: "ok",
+    stage,
+    directory: coursewareDir,
+    writtenFiles,
+    sourceCount: sources.length,
+    recoverableBlockers: sourceIndex.recoverableBlockers,
+  };
+}
+
+function resolveStudyDirectory(args: Record<string, unknown>, context: PluginInput): string {
+  const baseDirectory = path.resolve(context.directory ?? process.cwd());
+  const requestedDirectory = readString(args["directory"]);
+  if (!requestedDirectory) return baseDirectory;
+
+  const directory = path.resolve(baseDirectory, requestedDirectory);
+  const relative = path.relative(baseDirectory, directory);
+  const insideBase = relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+
+  if (!insideBase && args["allowExternalDirectory"] !== true) {
+    throw new Error("Study tools require allowExternalDirectory=true before reading or writing outside the current OpenCode working directory.");
+  }
+
+  return directory;
+}
+
+function extractPdfLiteralText(content: string): string {
+  const chunks: string[] = [];
+
+  for (const match of content.matchAll(/\((?:\\.|[^\\)])*\)\s*Tj/g)) {
+    chunks.push(match[0].replace(/\)\s*Tj$/, "").replace(/^\(/, ""));
+  }
+
+  for (const match of content.matchAll(/\[((?:\s*\((?:\\.|[^\\)]).*?\)\s*)+)\]\s*TJ/g)) {
+    const arrayContent = match[1] ?? "";
+    chunks.push(...[...arrayContent.matchAll(/\((?:\\.|[^\\)])*\)/g)].map((item) => item[0].slice(1, -1)));
+  }
+
+  return chunks
+    .join(" ")
+    .replace(/\\([nrtbf()\\])/g, (_match, escaped: string) => {
+      if (escaped === "n" || escaped === "r") return "\n";
+      if (escaped === "t") return "\t";
+      return escaped;
+    })
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function summarizeStudyExtraction(
+  method: string,
+  slides: readonly StudySlide[],
+  blocked = false,
+): StudyExtractionSummary {
+  const textLength = slides.reduce((sum, slide) => sum + slide.text.trim().length, 0);
+  const lowTextPageCount = slides.filter((slide) => slide.lowText).length;
+  const lowTextRatio = slides.length > 0 ? lowTextPageCount / slides.length : 1;
+  const quality: StudyExtractionQuality = blocked
+    ? "blocked"
+    : textLength === 0 || lowTextRatio > 0.6
+      ? "low"
+      : method.includes("fallback") || lowTextRatio > 0.25
+        ? "medium"
+        : "high";
+  const confidence = quality === "high" ? 0.9 : quality === "medium" ? 0.65 : quality === "low" ? 0.35 : 0;
+
+  return {
+    method,
+    quality,
+    confidence,
+    textLength,
+    lowTextPageCount,
+    needsManualReview: blocked || quality === "low" || lowTextPageCount > 0,
+  };
+}
+
+function extractZipEntries(buffer: Buffer): Array<{ name: string; text: string }> {
+  const entries: Array<{ name: string; text: string }> = [];
+  let offset = 0;
+
+  while (offset + 30 <= buffer.length) {
+    const signature = buffer.readUInt32LE(offset);
+    if (signature !== 0x04034b50) {
+      offset += 1;
+      continue;
+    }
+
+    const compression = buffer.readUInt16LE(offset + 8);
+    const compressedSize = buffer.readUInt32LE(offset + 18);
+    const fileNameLength = buffer.readUInt16LE(offset + 26);
+    const extraLength = buffer.readUInt16LE(offset + 28);
+    const nameStart = offset + 30;
+    const dataStart = nameStart + fileNameLength + extraLength;
+    const dataEnd = dataStart + compressedSize;
+
+    if (dataEnd > buffer.length) break;
+
+    const name = buffer.subarray(nameStart, nameStart + fileNameLength).toString("utf8");
+    const raw = buffer.subarray(dataStart, dataEnd);
+    let data: Buffer | undefined;
+
+    if (compression === 0) data = raw;
+    if (compression === 8) {
+      try {
+        data = inflateRawSync(raw);
+      } catch {
+        data = undefined;
+      }
+    }
+
+    if (data && /(?:ppt\/slides\/slide\d+|ppt\/notesSlides\/notesSlide\d+|docProps\/)/.test(name)) {
+      entries.push({ name, text: data.toString("utf8") });
+    }
+
+    offset = dataEnd;
+  }
+
+  return entries;
+}
+
+function extractPptxSlides(buffer: Buffer): StudySlide[] {
+  const entries = extractZipEntries(buffer)
+    .filter((entry) => /ppt\/slides\/slide\d+\.xml$/.test(entry.name))
+    .sort((left, right) => left.name.localeCompare(right.name, undefined, { numeric: true }));
+
+  if (entries.length === 0) {
+    const fallback = decodeXmlText(buffer.toString("utf8"));
+    const title = fallback.split(/[。.!?\n]/, 1)[0]?.slice(0, 80);
+    return fallback
+      ? [{
+        page: 1,
+        ...(title ? { title } : {}),
+        text: fallback,
+        lowText: fallback.length < 40,
+        extractionMethod: "pptx-xml-fallback",
+        extractionQuality: fallback.length < 40 ? "low" : "medium",
+        confidence: fallback.length < 40 ? 0.35 : 0.65,
+        needsManualReview: fallback.length < 40,
+      }]
+      : [];
+  }
+
+  return entries.map((entry, index) => {
+    const textRuns = [...entry.text.matchAll(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g)]
+      .map((match) => decodeXmlText(match[1] ?? ""));
+    const text = uniqueStrings(textRuns).join("\n");
+
+    return {
+      page: index + 1,
+      ...(textRuns[0] ? { title: textRuns[0].slice(0, 120) } : {}),
+      text,
+      lowText: text.length < 40,
+      extractionMethod: "pptx-xml",
+      extractionQuality: text.length < 40 ? "low" : "high",
+      confidence: text.length < 40 ? 0.35 : 0.9,
+      needsManualReview: text.length < 40,
+    };
+  });
+}
+
+function extractPdfPagesFromText(text: string, method: string, pageHint = 1): StudySlide[] {
+  const pages = text.split(/\f|(?:\s*-{3,}\s*)/).filter((page) => page.trim() !== "");
+  const normalized = pages.length > 0 ? pages : [text];
+
+  return normalized.slice(0, pageHint || normalized.length).map((pageText, index) => {
+    const cleanText = pageText.trim();
+    const title = cleanText.split(/[。.!?\n]/, 1)[0]?.slice(0, 120);
+    const lowText = cleanText.length < 80;
+
+    return {
+      page: index + 1,
+      ...(title ? { title } : {}),
+      text: cleanText,
+      lowText,
+      extractionMethod: method,
+      extractionQuality: lowText ? "low" : method.includes("fallback") ? "medium" : "high",
+      confidence: lowText ? 0.35 : method.includes("fallback") ? 0.65 : 0.9,
+      needsManualReview: lowText,
+    };
+  });
+}
+
+function extractPdfPages(buffer: Buffer): StudySlide[] {
+  const content = buffer.toString("latin1");
+  const pageCount = Math.max(1, (content.match(/\/Type\s*\/Page\b/g) ?? []).length);
+  const text = extractPdfLiteralText(content) || decodeXmlText(content.replace(/[^\x20-\x7e\u4e00-\u9fff]+/g, " "));
+  return extractPdfPagesFromText(text, "pdf-literal-fallback", pageCount);
+}
+
+async function extractPdfPagesWithOptionalTool(filePath: string, buffer: Buffer): Promise<StudySlide[]> {
+  const pdftotext = await findExecutableOnPath(process.platform === "win32" ? ["pdftotext.exe", "pdftotext"] : ["pdftotext"]);
+  if (pdftotext) {
+    try {
+      const { stdout } = await execFileAsync(pdftotext, ["-layout", filePath, "-"], {
+        timeout: 10_000,
+        maxBuffer: 20 * 1024 * 1024,
+      });
+      const text = String(stdout).trim();
+      if (text !== "") return extractPdfPagesFromText(text, "pdftotext", Math.max(1, text.split("\f").length));
+    } catch {
+    }
+  }
+
+  return extractPdfPages(buffer);
+}
+
+async function findExecutableOnPath(names: readonly string[]): Promise<string | undefined> {
+  const directories = (process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
+
+  for (const directory of directories) {
+    for (const name of names) {
+      const candidate = path.join(directory, name);
+      try {
+        await access(candidate, fsConstants.X_OK);
+        return candidate;
+      } catch {
+      }
+    }
+  }
+
+  return undefined;
+}
+
+async function findConvertedCoursewareFile(directory: string, baseName: string): Promise<string | undefined> {
+  for (const extension of [".pptx", ".pdf"]) {
+    const candidate = path.join(directory, `${baseName}${extension}`);
+    if (await fileExists(candidate)) return candidate;
+  }
+
+  return undefined;
+}
+
+async function convertLegacyPptWithSoffice(
+  filePath: string,
+  soffice: string,
+): Promise<{ convertedPath?: string; outputDirectory: string; error?: string }> {
+  const conversionDirectory = path.join(os.tmpdir(), `omo-lite-ppt-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+
+  try {
+    await mkdir(conversionDirectory, { recursive: true });
+    await execFileAsync(soffice, [
+      "--headless",
+      "--convert-to",
+      "pptx",
+      "--outdir",
+      conversionDirectory,
+      filePath,
+    ], {
+      timeout: 30_000,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    const convertedPath = await findConvertedCoursewareFile(conversionDirectory, path.basename(filePath, path.extname(filePath)));
+    return {
+      outputDirectory: conversionDirectory,
+      ...(convertedPath ? { convertedPath } : {}),
+    };
+  } catch (error) {
+    return {
+      outputDirectory: conversionDirectory,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function extractSlidesFromCoursewareFile(filePath: string, extension: string): Promise<StudySlide[]> {
+  const buffer = await readFile(filePath);
+  if (extension === ".pptx") return extractPptxSlides(buffer);
+  if (extension === ".pdf") return extractPdfPagesWithOptionalTool(filePath, buffer);
+  return [];
+}
+
+async function ingestStudyCourseware(
+  directory: string,
+): Promise<Record<string, unknown>> {
+  const coursewareDir = path.resolve(directory);
+  const entries = await readdir(coursewareDir, { withFileTypes: true });
+  const sources: Array<Record<string, unknown>> = [];
+  const ignoredGeneratedOutputs: string[] = [];
+  const recoverableBlockers: Array<Record<string, unknown>> = [];
+
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      if (STUDY_GENERATED_DIRECTORIES.has(entry.name)) ignoredGeneratedOutputs.push(`${entry.name}/`);
+      continue;
+    }
+
+    if (!entry.isFile()) continue;
+    if (STUDY_GENERATED_FILES.has(entry.name)) {
+      ignoredGeneratedOutputs.push(entry.name);
+      continue;
+    }
+
+    const extension = path.extname(entry.name).toLowerCase();
+    if (!STUDY_SUPPORTED_EXTENSIONS.has(extension)) continue;
+
+    const filePath = path.join(coursewareDir, entry.name);
+    const info = await stat(filePath);
+    const source: Record<string, unknown> = {
+      id: slugifyStudyId(entry.name),
+      filename: entry.name,
+      extension,
+      sizeBytes: info.size,
+      status: "ok",
+      slides: [],
+      chapterCandidates: [],
+      lowTextPages: [],
+      warnings: [],
+      blockers: [],
+    };
+
+    let slides: StudySlide[] = [];
+    if (extension === ".ppt") {
+      const soffice = await findExecutableOnPath(process.platform === "win32" ? ["soffice.exe", "soffice"] : ["soffice", "libreoffice"]);
+      if (!soffice) {
+        const blocker = {
+          file: entry.name,
+          reason: "Legacy .ppt requires LibreOffice/soffice conversion before text extraction.",
+          recoverability: "recoverable",
+          requiredTool: "soffice",
+        };
+        source.status = "blocked";
+        source.extraction = summarizeStudyExtraction("ppt-soffice-missing", [], true);
+        source.blockers = [blocker];
+        recoverableBlockers.push(blocker);
+        sources.push(source);
+        continue;
+      }
+
+      const conversion = await convertLegacyPptWithSoffice(filePath, soffice);
+      source.converter = soffice;
+      source.conversion = {
+        method: "soffice",
+        outputDirectory: conversion.outputDirectory,
+        ...(conversion.convertedPath ? { convertedPath: conversion.convertedPath } : {}),
+        ...(conversion.error ? { error: conversion.error } : {}),
+      };
+
+      if (!conversion.convertedPath) {
+        const blocker = {
+          file: entry.name,
+          reason: conversion.error ?? "LibreOffice/soffice did not produce a converted .pptx or .pdf file.",
+          recoverability: "recoverable",
+          requiredTool: "soffice",
+        };
+        source.status = "blocked";
+        source.extraction = summarizeStudyExtraction("ppt-soffice-conversion-failed", [], true);
+        source.blockers = [blocker];
+        recoverableBlockers.push(blocker);
+        sources.push(source);
+        continue;
+      }
+
+      const convertedExtension = path.extname(conversion.convertedPath).toLowerCase();
+      slides = (await extractSlidesFromCoursewareFile(conversion.convertedPath, convertedExtension)).map((slide) => ({
+        ...slide,
+        extractionMethod: `soffice->${slide.extractionMethod ?? convertedExtension.slice(1)}`,
+      }));
+    } else {
+      slides = await extractSlidesFromCoursewareFile(filePath, extension);
+    }
+
+    const allText = slides.map((slide) => slide.text).join("\n");
+    const chapterCandidates = extractChapterCandidates(allText);
+    const lowTextPages = slides.filter((slide) => slide.lowText).map((slide) => slide.page);
+
+    source.slides = slides;
+    source.pageCount = slides.length;
+    source.chapterCandidates = chapterCandidates;
+    source.lowTextPages = lowTextPages;
+    source.extraction = summarizeStudyExtraction(extension === ".ppt" ? "ppt-soffice-converted" : (slides[0]?.extractionMethod ?? "unknown"), slides);
+    source.status = slides.length > 0 && allText.trim() !== "" ? "ok" : "low-text";
+    source.warnings = lowTextPages.length > 0
+      ? [`${lowTextPages.length} page(s) are low-text or text-sparse and need manual review.`]
+      : [];
+    sources.push(source);
+  }
+
+  const chapterCandidates = uniqueStrings(
+    sources.flatMap((source) => Array.isArray(source.chapterCandidates) ? source.chapterCandidates as string[] : []),
+  );
+  const lowTextPages = sources.flatMap((source) => (
+    Array.isArray(source.lowTextPages)
+      ? (source.lowTextPages as number[]).map((page) => ({ file: source.filename, page }))
+      : []
+  ));
+
+  return {
+    directory: coursewareDir,
+    policy: {
+      recursive: false,
+      canonicalSource: "courseware",
+      externalLabelRequired: "[External]",
+      outputDirectory: "current-directory",
+    },
+    discoveredFiles: sources.map((source) => source.filename),
+    ignoredGeneratedOutputs,
+    sources,
+    chapterCandidates,
+    lowTextPages,
+    recoverableBlockers,
+  };
 }
 
 async function fileExists(filePath: string): Promise<boolean> {
@@ -1383,6 +2019,20 @@ Examples:
         args: {},
         async execute() {
           return formatToolJsonOutput(runtimeProfile);
+        },
+      },
+      bounded_lite_study_ingest: {
+        description: "Discover first-level .ppt, .pptx, and .pdf courseware in the current directory and return a structured study source index with low-text and recoverable-blocker reports. Passing a directory outside the current OpenCode working directory requires allowExternalDirectory=true after explicit user authorization.",
+        args: {},
+        async execute(args, context) {
+          return formatToolJsonOutput(await ingestStudyCourseware(resolveStudyDirectory(args, context)));
+        },
+      },
+      bounded_lite_study_package: {
+        description: "Generate the current-directory /study review project files from first-level courseware while preserving AGENTS.md managed-block safety. Use stage=sources for a source-index/notes-only pass before full review generation. Passing a directory outside the current OpenCode working directory requires allowExternalDirectory=true after explicit user authorization.",
+        args: {},
+        async execute(args, context) {
+          return formatToolJsonOutput(await generateStudyPackage(resolveStudyDirectory(args, context), readStudyPackageStage(args)));
         },
       },
       bounded_lite_model_config: {

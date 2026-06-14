@@ -18,9 +18,9 @@ Tired of complicated agent frameworks? Try Oh My Lite! It stays lightweight whil
 - `plan-builder` and `deep-plan-builder` include Decision Selector Discipline so blocking choices are presented as 2-5 concrete options, with `Custom / other` available when user-supplied input is valid.
 - `result-review` is optional and user-selectable. It reviews Command Lead execution summaries/final integrated results, not Task Lead child task returns.
 - Delegating roles use an explicit assignment template: `TASK`, `EXPECTED OUTCOME`, `ROLE`, `SCOPE`, `UPSTREAM EVIDENCE`, `REQUIRED TOOLS`, `MUST DO`, `MUST NOT DO`, `CONTEXT`, `DELIVERABLE FORMAT`, and `FAILURE RETURN`; new subagent tasks omit `task_id` entirely.
-- Durable plan artifacts are written to `.liteagent/plans/`, with an append-only index at `.liteagent/plan-index.jsonl`.
+- Plan Builder first presents a lightweight candidate-plan overview; durable plan artifacts are written to `.liteagent/plans/` only after explicit user confirmation, with an append-only index at `.liteagent/plan-index.jsonl`.
 - For user-owned small and medium projects, Command Lead favors root-cause refactors and complete problem-focused fixes over incidental compatibility shims or narrow local patches, while preserving public APIs, persisted formats, installer/config contracts, permission boundaries, role topology, external integrations, and user-stated constraints.
-- Provider-compatible async plugin tools: `bounded_lite_route`, `bounded_lite_plan_dag`, `bounded_lite_plan_readiness`, `bounded_lite_plan_artifact`, `bounded_lite_background`, `bounded_lite_runtime_profile`, `bounded_lite_model_config`.
+- Provider-compatible async plugin tools: `bounded_lite_route`, `bounded_lite_plan_dag`, `bounded_lite_plan_readiness`, `bounded_lite_plan_artifact`, `bounded_lite_background`, `bounded_lite_runtime_profile`, `bounded_lite_study_ingest`, `bounded_lite_study_package`, `bounded_lite_model_config`.
 - OpenCode's native `build` and `plan` modes are hidden and disabled.
 - The global installer preserves your existing model, provider, API key, plugin, MCP, and custom agent settings.
 
@@ -89,6 +89,8 @@ bounded_lite_plan_readiness
 bounded_lite_plan_artifact
 bounded_lite_background
 bounded_lite_runtime_profile
+bounded_lite_study_ingest
+bounded_lite_study_package
 bounded_lite_model_config
 ```
 
@@ -161,6 +163,21 @@ Examples:
 ```
 
 `/go` is a workflow command, not a new OpenCode mode or agent. It does not commit, push, publish, perform destructive actions, or write external/user-local OpenCode config unless the goal explicitly requests and authorizes that action.
+
+
+## Study Review Workflow Command
+
+Run this from a directory that contains courseware files, inside the OpenCode TUI:
+
+```text
+/study --subject "Database" --exam "closed-book final"
+```
+
+`/study` sends the current directory to `command-lead` as a final exam review workflow. It uses `bounded_lite_study_ingest` to discover only first-level `.ppt`, `.pptx`, and `.pdf` files, then `bounded_lite_study_package` to create the default review project. Courseware is the canonical source, and the review project is written back into the same directory by default. The package tool supports `stage: "sources"` for a source-index/notes-only pass before full study material generation.
+
+Default outputs include `AGENTS.md`, `source-index.json`, `study-guide.md`, `exam-points.md`, `mindmap.md`, `anki_flashcards.csv`, `practice-questions.md`, `coverage-report.md`, plus `sources/`, `summaries/`, `reviews/`, and `repairs/`. Existing `AGENTS.md` content is preserved; Oh My Lite only manages the `<!-- oh-my-lite-study:start -->` to `<!-- oh-my-lite-study:end -->` block.
+
+External explanations are allowed as supplemental context but must be marked `[External]`. PDF extraction prefers optional `pdftotext` when available and falls back to built-in literal extraction. Legacy `.ppt` files use LibreOffice/`soffice` conversion when available; if conversion is missing or fails, `/study` reports a recoverable blocker instead of silently skipping the file. Ingest reports `extractionQuality`, `confidence`, and `needsManualReview` for text-sparse pages. `/study` is a command workflow, not a new OpenCode mode or agent.
 
 
 ## Role and Task Lead Profile Model Configuration
