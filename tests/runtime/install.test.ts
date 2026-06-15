@@ -20,8 +20,18 @@ describe("global installer contract", () => {
     expect(installScript).toContain('"agent-models"');
     expect(installScript).toContain('"go"');
     expect(installScript).toContain('"study"');
+    expect(installScript).toContain('"update-lite"');
     expect(installScript).toContain('"Character-model"');
     expect(installScript).toContain("!MANAGED_COMMAND_NAMES.has(commandName)");
+  });
+
+  it("injects install-scoped paths into the update-lite command", () => {
+    expect(installScript).toContain("function buildUpdateLiteCommand(rootDir, configDir)");
+    expect(installScript).toContain("function buildUpdateLiteInstallCommand(rootDir, configDir)");
+    expect(installScript).toContain("function allowInstallScopedUpdateLite(config, context)");
+    expect(installScript).toContain("__OH_MY_LITE_SOURCE_ROOT__");
+    expect(installScript).toContain("__OH_MY_LITE_CONFIG_DIR__");
+    expect(installScript).toContain("injectInstallScopedCommands(mergedConfig, context)");
   });
 
   it("tracks managed MCP names separately from user MCP servers", () => {

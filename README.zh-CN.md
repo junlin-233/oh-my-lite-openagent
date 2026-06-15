@@ -302,6 +302,14 @@ npm run build
 npm run install:opencode
 ```
 
+安装后可在 OpenCode 中手动拉取远端最新版本并同步本插件：
+
+```text
+/update-lite
+```
+
+该命令会在安装时记录的本地源码仓库执行 `git pull --ff-only`，然后重新运行安装器；不会自动 commit、push、reset 或修改无关配置。
+
 ## 卸载
 
 安装器修改全局配置前会写入备份：

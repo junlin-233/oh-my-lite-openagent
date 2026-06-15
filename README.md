@@ -298,6 +298,14 @@ npm run build
 npm run install:opencode
 ```
 
+After installation, you can pull the latest remote version and sync this plugin from inside OpenCode:
+
+```text
+/update-lite
+```
+
+The command runs `git pull --ff-only` in the local source repository recorded at install time, then reruns the installer. It does not automatically commit, push, reset, or modify unrelated config.
+
 ## Uninstall
 
 The installer writes a backup before modifying global config:

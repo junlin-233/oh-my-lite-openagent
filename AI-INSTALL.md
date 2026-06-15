@@ -12,7 +12,7 @@ https://github.com/junlin-233/oh-my-lite-openagent
 
 Make Oh My Lite OpenAgent work globally for OpenCode with the best model for each role.
 
-After installation, the user should be able to run `opencode` from any directory and get `command-lead` as the default agent with the plugin tools loaded, `/go` and `/agent-models` registered as managed commands, and each role should have an appropriate model assigned.
+After installation, the user should be able to run `opencode` from any directory and get `command-lead` as the default agent with the plugin tools loaded, `/go`, `/agent-models`, and `/update-lite` registered as managed commands, and each role should have an appropriate model assigned.
 
 ## Step 1: Install
 
@@ -113,6 +113,7 @@ Confirm:
 - `command-lead` tools include `bounded_lite_model_config`.
 - `/agent-models` is registered in OpenCode commands.
 - `/go` is registered in OpenCode commands and targets `command-lead`.
+- `/update-lite` is registered in OpenCode commands and targets `command-lead`.
 - Managed zero-secret MCP defaults include `context7` and `playwright`, unless installation used `--no-managed-mcp`.
 - `build` mode is `subagent`.
 - `plan` mode is `subagent`.
@@ -196,6 +197,12 @@ Inside OpenCode, type `/agent-models`. The command-lead agent will call `bounded
 Inside OpenCode, type `/go <goal>`. The command sends `$ARGUMENTS` to `command-lead` as a non-interactive Go Protocol workflow. Command Lead should infer practical acceptance criteria from the goal and repository conventions, gather scoped evidence, choose the lightest safe strategy, implement or delegate bounded work, verify the result, and continue until acceptance passes or a hard blocker is reached.
 
 `/go` is a workflow command, not a new mode or agent. It must not commit, push, publish, perform destructive actions, or write external/user-local OpenCode config unless the user explicitly requests and authorizes that action.
+
+## How /update-lite Works
+
+Inside OpenCode, type `/update-lite` to update the installed plugin from the local source repository recorded by the installer. The command first runs `git pull --ff-only` in that source repository, then reruns `scripts/install.mjs` with the recorded `--root-dir` and `--config-dir`.
+
+`/update-lite` stops if the source repository cannot fast-forward. It must not commit, push, force-pull, reset, clean, or manually edit user config.
 
 ## Planning Questions
 

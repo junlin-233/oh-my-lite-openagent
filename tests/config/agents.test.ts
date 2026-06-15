@@ -93,6 +93,22 @@ describe("OpenCode agent topology", () => {
     expect(config.command?.study?.template).toContain("not a new OpenCode mode or agent");
   });
 
+  it("registers a /update-lite command for explicit plugin sync", () => {
+    expect(config.command?.["update-lite"]).toMatchObject({
+      agent: "command-lead",
+    });
+    expect(config.command?.["update-lite"]?.description).toContain("fast-forward");
+    expect(config.command?.["update-lite"]?.description).toContain("reinstall");
+    expect(config.command?.["update-lite"]?.template).toContain("git -C");
+    expect(config.command?.["update-lite"]?.template).toContain("pull --ff-only");
+    expect(config.command?.["update-lite"]?.template).toContain("node");
+    expect(config.command?.["update-lite"]?.template).toContain("scripts/install.mjs");
+    expect(config.command?.["update-lite"]?.template).toContain("--root-dir");
+    expect(config.command?.["update-lite"]?.template).toContain("--config-dir");
+    expect(config.command?.["update-lite"]?.template).toContain("restart OpenCode");
+    expect(config.command?.["update-lite"]?.template).toContain("Do not commit, push");
+  });
+
   it("registers zero-secret managed MCP defaults", () => {
     expect(config.mcp?.context7).toEqual({
       type: "local",

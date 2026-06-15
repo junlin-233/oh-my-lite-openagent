@@ -68,6 +68,20 @@ describe("global installer JSONC config handling", () => {
       expect(writtenConfig.provider.openai.models["gpt-5.4"].name).toBe("GPT-5.4");
       expect(writtenConfig.mcp.context7.command).toEqual(["npx", "-y", "@upstash/context7-mcp"]);
       expect(writtenConfig.mcp.playwright.command).toEqual(["npx", "-y", "@playwright/mcp"]);
+      expect(writtenConfig.command["update-lite"].agent).toBe("command-lead");
+      expect(writtenConfig.command["update-lite"].template).not.toContain("__OH_MY_LITE_SOURCE_ROOT__");
+      expect(writtenConfig.command["update-lite"].template).not.toContain("__OH_MY_LITE_CONFIG_DIR__");
+      expect(writtenConfig.command["update-lite"].template).toContain(process.cwd());
+      expect(writtenConfig.command["update-lite"].template).toContain(configDir);
+      expect(writtenConfig.command["update-lite"].template).toContain(
+        `git -C "${process.cwd()}" pull --ff-only`,
+      );
+      expect(writtenConfig.command["update-lite"].template).toContain(
+        `node "${path.join(process.cwd(), "scripts/install.mjs")}" --root-dir "${process.cwd()}" --config-dir "${configDir}"`,
+      );
+      expect(writtenConfig.permission.bash[
+        `node "${path.join(process.cwd(), "scripts/install.mjs")}" --root-dir "${process.cwd()}" --config-dir "${configDir}"`
+      ]).toBe("allow");
       expect(writtenConfig.plugin).toContain("./custom-plugin.ts");
       expect(writtenConfig.agent["custom-agent"].model).toBe("openai/gpt-5.4");
       expect(writtenConfig.agent["command-lead"]).toBeUndefined();
@@ -178,6 +192,7 @@ describe("global installer JSONC config handling", () => {
       expect(writtenConfig.permission.bash).toBeTruthy();
       expect(writtenConfig.permission.bash["*"]).toBe("allow");
       expect(writtenConfig.permission.bash["sudo *"]).toBe("ask");
+      expect(Object.values(writtenConfig.permission.bash)).toContain("allow");
       expect(Object.keys(writtenConfig.permission.bash).indexOf("*")).toBeLessThan(
         Object.keys(writtenConfig.permission.bash).indexOf("sudo *"),
       );

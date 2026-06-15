@@ -43,6 +43,8 @@ const PERMISSIVE_BASH_PERMISSION = {
   "npm run install:opencode *": "ask",
   "node scripts/install.mjs": "ask",
   "node scripts/install.mjs *": "ask",
+  "node */scripts/install.mjs": "ask",
+  "node */scripts/install.mjs *": "ask",
   "node scripts/install.mjs --dry-run": "allow",
   "node scripts/install.mjs --dry-run *": "allow",
   "curl * | *": "ask",
@@ -117,6 +119,25 @@ Safety boundaries:
 - Legacy .ppt is converted through LibreOffice/soffice when available; if conversion is unavailable or fails, return a recoverable blocker instead of silently skipping it.
 - /study is a command workflow through command-lead, not a new OpenCode mode or agent.`;
 
+const UPDATE_LITE_COMMAND_TEMPLATE = `Update the installed Oh My Lite OpenAgent plugin from the configured local source repository.
+
+Arguments: $ARGUMENTS
+
+Installed source repository: __OH_MY_LITE_SOURCE_ROOT__
+OpenCode config directory: __OH_MY_LITE_CONFIG_DIR__
+
+Workflow:
+1. First run exactly:
+   git -C "__OH_MY_LITE_SOURCE_ROOT__" pull --ff-only
+2. Then run exactly:
+   node "__OH_MY_LITE_SOURCE_ROOT__/scripts/install.mjs" --root-dir "__OH_MY_LITE_SOURCE_ROOT__" --config-dir "__OH_MY_LITE_CONFIG_DIR__"
+3. Report the install output and remind the user to restart OpenCode.
+
+Safety boundaries:
+- Do not commit, push, force-pull, reset, clean, or edit user config manually.
+- Do not run npm install, npm update, or arbitrary shell commands unless the user explicitly asks.
+- If the source repository path does not exist, stop and report the missing path.`;
+
 export const MANAGED_CONFIG = {
   "$schema": "https://opencode.ai/config.json",
   "default_agent": "command-lead",
@@ -135,6 +156,11 @@ export const MANAGED_CONFIG = {
       "description": "Generate a current-directory final exam review project from .ppt, .pptx, and .pdf courseware.",
       "agent": "command-lead",
       "template": STUDY_COMMAND_TEMPLATE
+    },
+    "update-lite": {
+      "description": "Safely fast-forward the configured local Oh My Lite OpenAgent source repository, then reinstall it.",
+      "agent": "command-lead",
+      "template": UPDATE_LITE_COMMAND_TEMPLATE
     }
   },
   "mcp": {

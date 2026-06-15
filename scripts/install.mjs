@@ -14,6 +14,7 @@ const MANAGED_COMMAND_NAMES = new Set([
   "agent-models",
   "go",
   "study",
+  "update-lite",
   "Character-model",
 ]);
 const MANAGED_MCP_NAMES = new Set([
@@ -834,6 +835,57 @@ function mergeConfig(existingConfig, sourceConfig, configDir, options = {}) {
   };
 }
 
+function replaceAllLiteral(value, search, replacement) {
+  return value.split(search).join(replacement);
+}
+
+function buildUpdateLiteInstallCommand(rootDir, configDir) {
+  return `node "${path.join(rootDir, "scripts/install.mjs")}" --root-dir "${rootDir}" --config-dir "${configDir}"`;
+}
+
+function buildUpdateLiteCommand(rootDir, configDir) {
+  const command = MANAGED_CONFIG.command?.["update-lite"];
+  if (!isRecord(command)) return undefined;
+
+  let template = typeof command.template === "string" ? command.template : "";
+  template = replaceAllLiteral(template, "__OH_MY_LITE_SOURCE_ROOT__", rootDir);
+  template = replaceAllLiteral(template, "__OH_MY_LITE_CONFIG_DIR__", configDir);
+
+  return {
+    ...command,
+    template,
+  };
+}
+
+function allowInstallScopedUpdateLite(config, context) {
+  const permission = isRecord(config.permission) ? config.permission : {};
+  const bash = isRecord(permission.bash) ? permission.bash : {};
+  const installCommand = buildUpdateLiteInstallCommand(context.rootDir, context.configDir);
+
+  return {
+    ...config,
+    permission: {
+      ...permission,
+      bash: {
+        ...bash,
+        [installCommand]: "allow",
+      },
+    },
+  };
+}
+
+function injectInstallScopedCommands(config, context) {
+  const withCommand = {
+    ...config,
+    command: {
+      ...(isRecord(config.command) ? config.command : {}),
+      "update-lite": buildUpdateLiteCommand(context.rootDir, context.configDir),
+    },
+  };
+
+  return allowInstallScopedUpdateLite(withCommand, context);
+}
+
 function applyModelAssignments(config, assignments) {
   const agents = isRecord(config.agent) ? config.agent : {};
 
@@ -965,11 +1017,13 @@ async function prepareInstallContext(options) {
 }
 
 function mergeAll(context) {
+  const mergedConfig = mergeConfig(context.existingConfig, MANAGED_CONFIG, context.configDir, {
+    managedMcp: context.managedMcp,
+  });
+
   return {
     liteConfig: mergeLiteConfig(context.existingLiteConfig, context.existingConfig),
-    mergedConfig: mergeConfig(context.existingConfig, MANAGED_CONFIG, context.configDir, {
-      managedMcp: context.managedMcp,
-    }),
+    mergedConfig: injectInstallScopedCommands(mergedConfig, context),
   };
 }
 

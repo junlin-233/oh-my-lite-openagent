@@ -113,6 +113,8 @@ describe("delegation boundaries", () => {
     expect(bash["node scripts/install.mjs --dry-run *"]).toBe("allow");
     expect(bash["node scripts/install.mjs"]).toBe("ask");
     expect(bash["node scripts/install.mjs *"]).toBe("ask");
+    expect(bash["node */scripts/install.mjs"]).toBe("ask");
+    expect(bash["node */scripts/install.mjs *"]).toBe("ask");
   });
 
   it("asks for dangerous pipe operations in bash with correct rule ordering", () => {
@@ -222,6 +224,7 @@ describe("delegation boundaries", () => {
       expect(agentBash["rm *"], agentName).toBe("ask");
       expect(agentBash["git push"], agentName).toBe("ask");
       expect(agentBash["node scripts/install.mjs"], agentName).toBe("ask");
+      expect(agentBash["node */scripts/install.mjs *"], agentName).toBe("ask");
       expect(agentBash["curl * | *"], agentName).toBe("ask");
       expect(agentBash["node scripts/install.mjs --dry-run"], agentName).toBe("allow");
       expect(Object.values(agentBash), agentName).not.toContain("deny");
